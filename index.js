@@ -1706,7 +1706,7 @@ async function handleSlashInteraction(interaction) {
       return;
     }
 
-    const spaceCommands = ["우주탐사", "자산", "행성", "엔진강화"];
+    const spaceCommands = ["우주탐사", "자산", "행성", "엔진강화", "수리강화"];
     if (spaceCommands.includes(interaction.commandName)) {
       await handleSpaceInteraction(interaction);
       return;
