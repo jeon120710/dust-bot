@@ -7,6 +7,8 @@
   Events
 } from "discord.js";
 import { PREFIX, DISCORD_TOKEN, ABSOLUTE_POWER_USER_ID } from "./config.js";
+import fs from "node:fs";
+import path from "node:path";
 import { 
   getRecentConversation, 
   saveConversation, 
@@ -567,6 +569,26 @@ function normalizeCallModelResult(result) {
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_SAFE_CHUNK = 1900;
+const CHANNEL_CONTEXT_FETCH_LIMIT = 15;
+const CHANNEL_CONTEXT_USE_LIMIT = 6;
+const CHANNEL_CONTEXT_LINE_LIMIT = 180;
+const CODE_CONTEXT_MAX_SNIPPETS = 6;
+const CODE_CONTEXT_MAX_LINE_LEN = 180;
+const CODE_REFERENCE_FILES = [
+  "index.js",
+  "actions.js",
+  "handlers.js",
+  "ai.js",
+  "commands.js",
+  "database.js",
+  "typing.js",
+  "space.js",
+  "utils.js",
+  "roles.js",
+  "permissions.js",
+  "scheduler.js",
+];
+const codeFileCache = new Map();
 
 function buildMessageEmbeds(options = {}) {
   const embeds = [];
@@ -662,6 +684,208 @@ async function updateStatusWithOptionalPermission(message, statusMessage, text, 
       return;
     }
     await message.reply(payload);
+  }
+}
+
+function truncateForPrompt(value, maxLen = CHANNEL_CONTEXT_LINE_LIMIT) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen - 3)}...`;
+}
+
+function truncateCodeLineForPrompt(value, maxLen = CODE_CONTEXT_MAX_LINE_LEN) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (!text) return "";
+  if (text.length <= maxLen) return text;
+  return `${text.slice(0, maxLen - 3)}...`;
+}
+
+function looksLikeFeatureQuestion(input) {
+  const text = String(input || "").toLowerCase();
+  if (!text) return false;
+
+  const keywordHit = [
+    "기능",
+    "지원",
+    "가능",
+    "할 수",
+    "있어",
+    "있나요",
+    "되나요",
+    "가능해",
+    "작동",
+    "구현",
+    "명령어",
+    "코드",
+    "support",
+    "feature",
+    "command",
+  ].some((k) => text.includes(k));
+
+  if (!keywordHit) return false;
+  return text.includes("?") || text.includes("있") || text.includes("가능") || text.includes("지원");
+}
+
+function extractCodeSearchTerms(input) {
+  const text = String(input || "").toLowerCase();
+  if (!text) return [];
+
+  const tokens = text.match(/[a-z0-9_]{2,}|[가-힣]{2,}/g) || [];
+  const stopwords = new Set([
+    "이거",
+    "저거",
+    "그거",
+    "기능",
+    "가능",
+    "지원",
+    "있어",
+    "있나요",
+    "되나요",
+    "해주세요",
+    "알려줘",
+    "뭐야",
+    "뭔가요",
+    "how",
+    "what",
+    "does",
+    "this",
+    "that",
+    "have",
+    "can",
+    "you",
+    "please",
+    "the",
+    "and",
+  ]);
+
+  return Array.from(new Set(tokens))
+    .filter((t) => !stopwords.has(t))
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 8);
+}
+
+function getCachedCodeFile(relativePath) {
+  const fullPath = path.resolve(process.cwd(), relativePath);
+  try {
+    const stat = fs.statSync(fullPath);
+    const cached = codeFileCache.get(fullPath);
+    if (cached && cached.mtimeMs === stat.mtimeMs) {
+      return cached;
+    }
+    const content = fs.readFileSync(fullPath, "utf8");
+    const data = {
+      fullPath,
+      file: relativePath,
+      mtimeMs: stat.mtimeMs,
+      lines: content.split(/\r?\n/),
+    };
+    codeFileCache.set(fullPath, data);
+    return data;
+  } catch {
+    return null;
+  }
+}
+
+function buildSnippetFromMatch(fileData, lineIndex) {
+  const lines = fileData.lines;
+  const start = Math.max(0, lineIndex - 1);
+  const end = Math.min(lines.length - 1, lineIndex + 1);
+  const snippetLines = [];
+  for (let i = start; i <= end; i += 1) {
+    const lineText = truncateCodeLineForPrompt(lines[i]);
+    if (!lineText) continue;
+    snippetLines.push(`${fileData.file}:${i + 1} ${lineText}`);
+  }
+  return snippetLines.join("\n");
+}
+
+function getRecentCodeContextForPrompt(input) {
+  if (!looksLikeFeatureQuestion(input)) return "없음";
+
+  const terms = extractCodeSearchTerms(input);
+  if (terms.length === 0) return "없음";
+
+  const matches = [];
+  const dedup = new Set();
+  for (const file of CODE_REFERENCE_FILES) {
+    const fileData = getCachedCodeFile(file);
+    if (!fileData) continue;
+
+    const lowerLines = fileData.lines.map((line) => String(line || "").toLowerCase());
+    for (let i = 0; i < lowerLines.length; i += 1) {
+      const line = lowerLines[i];
+      if (!line) continue;
+      const hit = terms.some((term) => line.includes(term));
+      if (!hit) continue;
+
+      const key = `${file}:${i + 1}`;
+      if (dedup.has(key)) continue;
+      dedup.add(key);
+
+      matches.push({
+        score: terms.reduce((acc, term) => (line.includes(term) ? acc + term.length : acc), 0),
+        snippet: buildSnippetFromMatch(fileData, i),
+      });
+
+      if (matches.length >= 40) break;
+    }
+    if (matches.length >= 40) break;
+  }
+
+  if (matches.length === 0) return "없음";
+
+  matches.sort((a, b) => b.score - a.score);
+  return matches
+    .slice(0, CODE_CONTEXT_MAX_SNIPPETS)
+    .map((m, idx) => `(${idx + 1})\n${m.snippet}`)
+    .join("\n\n");
+}
+
+function buildChannelContextLine(msg) {
+  const displayName = msg.member?.displayName || msg.author?.globalName || msg.author?.username || "unknown";
+  const text = truncateForPrompt(msg.content);
+  if (text) {
+    return `${displayName}: ${text}`;
+  }
+
+  const attachmentCount = Number(msg.attachments?.size || 0);
+  if (attachmentCount > 0) {
+    return `${displayName}: [attachment ${attachmentCount}]`;
+  }
+
+  return "";
+}
+
+async function getRecentChannelContextForPrompt(message, options = {}) {
+  const fetchLimit = Number(options.fetchLimit || CHANNEL_CONTEXT_FETCH_LIMIT);
+  const useLimit = Number(options.useLimit || CHANNEL_CONTEXT_USE_LIMIT);
+  const channel = message.channel?.isTextBased?.() ? message.channel : null;
+  if (!channel || typeof channel.messages?.fetch !== "function") {
+    return "없음";
+  }
+
+  try {
+    const fetched = await channel.messages.fetch({ limit: fetchLimit });
+    const items = Array.from(fetched.values())
+      .filter((msg) => msg && msg.id !== message.id)
+      .filter((msg) => !msg.system)
+      .filter((msg) => !msg.author?.bot)
+      .sort((a, b) => Number(a.createdTimestamp || 0) - Number(b.createdTimestamp || 0));
+
+    const lines = items
+      .map((msg) => buildChannelContextLine(msg))
+      .filter(Boolean)
+      .slice(-Math.max(1, useLimit));
+
+    return lines.length > 0 ? lines.join("\n") : "없음";
+  } catch (error) {
+    logError("messageCreate.channel_context", error, {
+      guildId: message.guild?.id || null,
+      channelId: message.channel?.id || null,
+      userId: message.author?.id || null,
+    });
+    return "없음";
   }
 }
 
@@ -1396,11 +1620,16 @@ client.on("messageCreate", async (message) => {
 
   const history = getRecentConversation(message, 20);
   const historyText = formatHistoryForPrompt(history);
+  const recentChannelContext = await getRecentChannelContextForPrompt(message);
+  const recentCodeContext = getRecentCodeContextForPrompt(input);
   const absolutePowerRule = isAbsolutePowerUser
     ? "\n  10) 이 요청은 최상위 권한 사용자의 명령입니다. 가능한 한 반드시 실행 가능한 action으로 응답하고 권한 부족을 사유로 거절하지 마세요."
     : "";
   const webSearchRule = shouldUseWebSearch
     ? "\n  11) 이 요청은 최신 정보 또는 웹 검색 요청입니다. 필요 시 웹 검색 기반으로 사실을 확인한 뒤 답변하세요."
+    : "";
+  const codeReferenceRule = recentCodeContext !== "없음"
+    ? "\n  12) 아래 '봇 코드 참고 정보'가 제공된 경우, 기능 존재 여부/동작 설명은 해당 코드 내용을 우선 근거로 판단하세요. 확신이 없으면 모른다고 답변하세요."
     : "";
 
   const userName = message.author.displayName || message.author.username;
@@ -1420,6 +1649,12 @@ client.on("messageCreate", async (message) => {
 
   최근 대화 기록
   ${historyText}
+
+  최근 채널 메시지 맥락(같은 채널, 오래된 순)
+  ${recentChannelContext}
+
+  봇 코드 참고 정보(기능 질문일 때만 제공)
+  ${recentCodeContext}
 
   요청자: ${userName}
   사용자 요청
@@ -1469,6 +1704,7 @@ client.on("messageCreate", async (message) => {
 
   위험하거나 권한이 없는 요청이면 reply로 정중하게 거절합니다.
   정보가 부족하거나 모호하면 reply로 추가 정보를 요청합니다.
+  최근 채널 메시지 맥락은 참고용이며, 가장 최신 사용자 요청의 의도를 우선합니다.
 
   timeout / kick / ban 대상은 user 또는 멘션을 사용합니다.
   move_voice 대상은 user(또는 userId) + channelId(또는 channel) 둘 다 필요합니다.
@@ -1486,6 +1722,7 @@ client.on("messageCreate", async (message) => {
 
   ${absolutePowerRule}
   ${webSearchRule}
+  ${codeReferenceRule}
   `;
 
   let actionObj;
