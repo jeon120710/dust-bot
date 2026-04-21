@@ -701,68 +701,58 @@ function truncateCodeLineForPrompt(value, maxLen = CODE_CONTEXT_MAX_LINE_LEN) {
   return `${text.slice(0, maxLen - 3)}...`;
 }
 
-function looksLikeFeatureQuestion(input) {
-  const text = String(input || "").toLowerCase();
-  if (!text) return false;
-
-  const keywordHit = [
-    "기능",
-    "지원",
-    "가능",
-    "할 수",
-    "있어",
-    "있나요",
-    "되나요",
-    "가능해",
-    "작동",
-    "구현",
-    "명령어",
-    "코드",
-    "support",
-    "feature",
-    "command",
-  ].some((k) => text.includes(k));
-
-  if (!keywordHit) return false;
-  return text.includes("?") || text.includes("있") || text.includes("가능") || text.includes("지원");
+function normalizeCodeSearchTerms(value) {
+  if (!Array.isArray(value)) return [];
+  const dedup = new Set();
+  for (const raw of value) {
+    const term = String(raw || "").trim().toLowerCase();
+    if (!term) continue;
+    if (term.length < 2 || term.length > 40) continue;
+    dedup.add(term);
+    if (dedup.size >= 10) break;
+  }
+  return Array.from(dedup);
 }
 
-function extractCodeSearchTerms(input) {
-  const text = String(input || "").toLowerCase();
-  if (!text) return [];
+async function classifyCodeReferencePlan(input) {
+  const text = String(input || "").trim();
+  if (!text) {
+    return { useCodeReference: false, searchTerms: [], reason: "empty_input" };
+  }
 
-  const tokens = text.match(/[a-z0-9_]{2,}|[가-힣]{2,}/g) || [];
-  const stopwords = new Set([
-    "이거",
-    "저거",
-    "그거",
-    "기능",
-    "가능",
-    "지원",
-    "있어",
-    "있나요",
-    "되나요",
-    "해주세요",
-    "알려줘",
-    "뭐야",
-    "뭔가요",
-    "how",
-    "what",
-    "does",
-    "this",
-    "that",
-    "have",
-    "can",
-    "you",
-    "please",
-    "the",
-    "and",
-  ]);
+  const prompt = `
+당신은 디스코드 봇 요청 분석기입니다.
+아래 사용자 요청에 대해, 답변 시 "봇 코드 참고 정보"가 필요한지 판단하세요.
 
-  return Array.from(new Set(tokens))
-    .filter((t) => !stopwords.has(t))
-    .sort((a, b) => b.length - a.length)
-    .slice(0, 8);
+출력 형식(JSON 1개만):
+{"useCodeReference":true|false,"searchTerms":["..."],"reason":"짧은 근거"}
+
+규칙:
+- 기능 존재 여부, 지원 가능 여부, 명령 가능 여부, 내부 동작/구현/코드 설명 질문이면 useCodeReference=true
+- 일반 잡담, 단순 실행 요청(타임아웃/킥/밴/역할 변경 등), 코드와 무관한 질문이면 false
+- searchTerms는 코드 검색용 핵심 키워드 1~8개
+- searchTerms에는 함수명, 액션명, 명령어명, 기능명 같은 실질 토큰을 넣고 군더더기는 제외
+- useCodeReference=false면 searchTerms는 빈 배열
+- 애매하면 false
+
+사용자 요청:
+"${text.replace(/"/g, '\\"')}"
+`;
+
+  try {
+    const resultText = await callModel(prompt);
+    const parsed = safeParseJsonObject(resultText);
+    if (!parsed || typeof parsed !== "object") {
+      return { useCodeReference: false, searchTerms: [], reason: "invalid_ai_response" };
+    }
+    const useCodeReference = parsed.useCodeReference === true;
+    const searchTerms = useCodeReference ? normalizeCodeSearchTerms(parsed.searchTerms) : [];
+    const reason = typeof parsed.reason === "string" ? parsed.reason : "";
+    return { useCodeReference, searchTerms: searchTerms.slice(0, 8), reason };
+  } catch (err) {
+    logError("code.reference.classify", err, { input: text });
+    return { useCodeReference: false, searchTerms: [], reason: "classify_error" };
+  }
 }
 
 function getCachedCodeFile(relativePath) {
@@ -800,10 +790,10 @@ function buildSnippetFromMatch(fileData, lineIndex) {
   return snippetLines.join("\n");
 }
 
-function getRecentCodeContextForPrompt(input) {
-  if (!looksLikeFeatureQuestion(input)) return "없음";
+function getRecentCodeContextForPrompt(plan) {
+  if (!plan?.useCodeReference) return "없음";
 
-  const terms = extractCodeSearchTerms(input);
+  const terms = normalizeCodeSearchTerms(plan.searchTerms);
   if (terms.length === 0) return "없음";
 
   const matches = [];
@@ -1621,7 +1611,8 @@ client.on("messageCreate", async (message) => {
   const history = getRecentConversation(message, 20);
   const historyText = formatHistoryForPrompt(history);
   const recentChannelContext = await getRecentChannelContextForPrompt(message);
-  const recentCodeContext = getRecentCodeContextForPrompt(input);
+  const codeReferencePlan = await classifyCodeReferencePlan(input);
+  const recentCodeContext = getRecentCodeContextForPrompt(codeReferencePlan);
   const absolutePowerRule = isAbsolutePowerUser
     ? "\n  10) 이 요청은 최상위 권한 사용자의 명령입니다. 가능한 한 반드시 실행 가능한 action으로 응답하고 권한 부족을 사유로 거절하지 마세요."
     : "";

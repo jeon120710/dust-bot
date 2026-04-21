@@ -8,6 +8,8 @@ import {
 } from "discord.js";
 import { addUserPoints, getUserStats, updateUserStats, upgradeUserSpeed, upgradeUserArmor } from "./assets.js";
 
+const activeSpaceExplorations = new Map();
+
 export const PLANETS = {
   "지구": { cost: 0, multiplier: 1, baseTime: 30, description: "평화로운 시작의 행성입니다. (기본 30초)" },
   "화성": { cost: 10000, multiplier: 2, baseTime: 60, description: "척박하지만 자원이 풍부한 붉은 행성입니다. (기본 1분)" },
@@ -197,6 +199,20 @@ export async function handleSpaceInteraction(interaction) {
   }
 
   // 요청하신 확률 로직: 숫자 2개를 뽑아 비교
+  const explorationKey = `${interaction.guildId || "dm"}:${interaction.user.id}`;
+  const nowMs = Date.now();
+  const activeUntil = Number(activeSpaceExplorations.get(explorationKey) || 0);
+  if (activeUntil > nowMs) {
+    const remainingSeconds = Math.max(1, Math.ceil((activeUntil - nowMs) / 1000));
+    return interaction.reply({
+      content: `이미 우주선이 발사되어 탐사 중입니다. 약 ${remainingSeconds}초 후 다시 시도해 주세요.`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  if (activeUntil > 0) {
+    activeSpaceExplorations.delete(explorationKey);
+  }
+
   const threshold = Math.floor(Math.random() * 100) + 1; // 기준 확률 (1~100)
   
   // 시간 계산 (Lv.0 = baseTime, Lv.9 = 3초)
@@ -211,7 +227,11 @@ export async function handleSpaceInteraction(interaction) {
     .setColor(0x3498db)
     .setTimestamp();
 
-  await interaction.reply({ embeds: [startEmbed] });
+  const explorationEndsAt = Date.now() + (waitTime * 1000);
+  activeSpaceExplorations.set(explorationKey, explorationEndsAt);
+
+  try {
+    await interaction.reply({ embeds: [startEmbed] });
 
   // 탐사 시간만큼 대기
   await new Promise((resolve) => setTimeout(resolve, waitTime * 1000));
@@ -273,5 +293,8 @@ export async function handleSpaceInteraction(interaction) {
       .setDisabled(true) // 명령어 안내용으로 비활성 처리하거나, 필요 시 로직 연결 가능
   );
 
-  return interaction.editReply({ embeds: [embed], components: [row] });
+    return interaction.editReply({ embeds: [embed], components: [row] });
+  } finally {
+    activeSpaceExplorations.delete(explorationKey);
+  }
 }
