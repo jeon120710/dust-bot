@@ -8,8 +8,14 @@ const TRIGGER_ROLE_ID = "1464577978565525679";
 const TARGET_ROLE_ID = "1495322891422662816";
 const CONFIG_PATH = path.resolve(process.cwd(), "scheduler_config.json");
 
-const ROLE_ADD_TIME = { hour: 21, minute: 30 };
-const ROLE_REMOVE_TIME = { hour: 3, minute: 0 };
+const ROLE_ADD_TIMES = [
+  { hour: 16, minute: 0 },
+  { hour: 22, minute: 0 },
+];
+const ROLE_REMOVE_TIMES = [
+  { hour: 18, minute: 0 },
+  { hour: 0, minute: 0 },
+];
 
 const SEOUL_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
   timeZone: "Asia/Seoul",
@@ -25,6 +31,10 @@ function sleep(ms) {
 function formatScheduleLabel(schedule) {
   const minuteText = String(schedule.minute).padStart(2, "0");
   return `${schedule.hour}:${minuteText}`;
+}
+
+function findMatchingSchedule(schedules, hour, minute) {
+  return schedules.find((schedule) => schedule.hour === hour && schedule.minute === minute) ?? null;
 }
 
 function getLogChannelId() {
@@ -48,8 +58,9 @@ export function setLogChannelId(channelId) {
  * 특정 서버의 멤버들에게 스케줄에 맞춰 역할을 추가하거나 제거합니다.
  * @param {import("discord.js").Client} client
  * @param {boolean} isAddition true면 추가, false면 제거
+ * @param {{hour: number, minute: number} | null} schedule
  */
-async function runScheduledRoleUpdate(client, isAddition) {
+async function runScheduledRoleUpdate(client, isAddition, schedule = null) {
   try {
     const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
     if (!guild) return;
@@ -58,8 +69,11 @@ async function runScheduledRoleUpdate(client, isAddition) {
     const members = Array.from(guild.members.cache.values());
     let successCount = 0;
 
-    const addReason = `자동 역할 지급 (${formatScheduleLabel(ROLE_ADD_TIME)})`;
-    const removeReason = `자동 역할 회수 (${formatScheduleLabel(ROLE_REMOVE_TIME)})`;
+    const scheduleLabel = schedule
+      ? formatScheduleLabel(schedule)
+      : formatScheduleLabel(isAddition ? ROLE_ADD_TIMES[0] : ROLE_REMOVE_TIMES[0]);
+    const addReason = `자동 역할 지급 (${scheduleLabel})`;
+    const removeReason = `자동 역할 회수 (${scheduleLabel})`;
 
     for (const member of members) {
       if (member.user.bot) continue;
@@ -96,9 +110,6 @@ async function runScheduledRoleUpdate(client, isAddition) {
     const logChannel = await client.channels.fetch(logChannelId).catch(() => null);
     if (!logChannel || !logChannel.isTextBased()) return;
 
-    const scheduleLabel = isAddition
-      ? formatScheduleLabel(ROLE_ADD_TIME)
-      : formatScheduleLabel(ROLE_REMOVE_TIME);
     const embed = new EmbedBuilder()
       .setTitle(isAddition ? "스케줄 역할 지급 완료" : "스케줄 역할 회수 완료")
       .setColor(isAddition ? 0x5865f2 : 0xf1c40f)
@@ -121,11 +132,11 @@ export function startRoleScheduler(client) {
   let lastRunKey = "";
   let isRunning = false;
 
-  async function safeRun(isAddition) {
+  async function safeRun(isAddition, schedule) {
     if (isRunning) return;
     isRunning = true;
     try {
-      await runScheduledRoleUpdate(client, isAddition);
+      await runScheduledRoleUpdate(client, isAddition, schedule);
     } finally {
       isRunning = false;
     }
@@ -141,8 +152,11 @@ export function startRoleScheduler(client) {
 
     if (lastRunKey !== currentKey) {
       lastRunKey = currentKey;
-      if (hour === ROLE_ADD_TIME.hour && minute === ROLE_ADD_TIME.minute) safeRun(true);
-      if (hour === ROLE_REMOVE_TIME.hour && minute === ROLE_REMOVE_TIME.minute) safeRun(false);
+      const matchedAddSchedule = findMatchingSchedule(ROLE_ADD_TIMES, hour, minute);
+      if (matchedAddSchedule) safeRun(true, matchedAddSchedule);
+
+      const matchedRemoveSchedule = findMatchingSchedule(ROLE_REMOVE_TIMES, hour, minute);
+      if (matchedRemoveSchedule) safeRun(false, matchedRemoveSchedule);
     }
   }, 30000);
 }

@@ -2132,7 +2132,7 @@ client.once(Events.ClientReady, async () => {
     `${client.user.tag} 봇이 온라인 상태입니다. 샤드: ${shardId}, 접두사: ${PREFIX}, 현재 모델: ${getCurrentModelName()}`,
   );
 
-  // 스케줄러 시작 (21시 역할 지급, 03시 역할 회수)
+  // 스케줄러 시작 (16시/22시 역할 지급, 18시/00시 역할 회수)
   startRoleScheduler(client);
 });
 
