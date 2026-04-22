@@ -90,6 +90,7 @@ function buildPendingKey(message) {
 const RESTART_CONFIRM_TTL_MS = 60_000;
 const SHUTDOWN_CONFIRM_TTL_MS = 60_000;
 const PRIVILEGED_ACTION_TTL_MS = 60_000;
+const TARGET_CONFIRM_TTL_MS = 60_000;
 const BATCH_ACTION_TTL_MS = 60_000;
 const pendingRestartConfirm = new Map();
 const pendingShutdownConfirm = new Map();
@@ -127,14 +128,24 @@ const PRIVILEGED_ACTIONS = new Set([
   "delete_channel",
 ]);
 
-async function classifyRestartConfirmation(text) {
+function escapePromptValue(value) {
+  return String(value || "").replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+async function classifyBinaryConfirmation(text, options = {}) {
+  const {
+    targetLabel = "실행 진행",
+    confirmRule = "confirm: 실행을 지금 진행하라고 명확히 동의/승인",
+    cancelRule = "cancel: 실행을 하지 말라고 명확히 거부/취소",
+  } = options;
+
   const prompt = `
 당신은 디스코드 봇 운영 보조 분류기입니다.
-아래 사용자 메시지가 "재시작 진행"에 대한 명확한 확인인지 판단하세요.
+아래 사용자 메시지가 "${targetLabel}"에 대한 명확한 확인인지 판단하세요.
 
 규칙:
-- confirm: 재시작을 지금 진행하라고 명확히 동의/승인
-- cancel: 재시작을 하지 말라고 명확히 거부/취소
+- ${confirmRule}
+- ${cancelRule}
 - other: 그 외 모든 경우(애매하면 other)
 - 출력은 JSON 1개만.
 
@@ -142,7 +153,7 @@ async function classifyRestartConfirmation(text) {
 {"decision":"confirm|cancel|other","reason":"짧은 판단 근거"}
 
 메시지:
-"${String(text || "").replace(/"/g, '\\"')}"
+"${escapePromptValue(text)}"
 `;
 
   try {
@@ -157,122 +168,43 @@ async function classifyRestartConfirmation(text) {
         };
       }
     }
-  } catch (err) {
+  } catch {
     // swallow and fall through
   }
 
   return { decision: "other", reason: "invalid_ai_response" };
+}
+
+async function classifyRestartConfirmation(text) {
+  return classifyBinaryConfirmation(text, {
+    targetLabel: "재시작 진행",
+    confirmRule: "confirm: 재시작을 지금 진행하라고 명확히 동의/승인",
+    cancelRule: "cancel: 재시작을 하지 말라고 명확히 거부/취소",
+  });
 }
 
 async function classifyShutdownConfirmation(text) {
-  const prompt = `
-당신은 디스코드 봇 운영 보조 분류기입니다.
-아래 사용자 메시지가 "종료 진행"에 대한 명확한 확인인지 판단하세요.
-
-규칙:
-- confirm: 종료를 지금 진행하라고 명확히 동의/승인
-- cancel: 종료를 하지 말라고 명확히 거부/취소
-- other: 그 외 모든 경우(애매하면 other)
-- 출력은 JSON 1개만.
-
-출력 형식:
-{"decision":"confirm|cancel|other","reason":"짧은 판단 근거"}
-
-메시지:
-"${String(text || "").replace(/"/g, '\\"')}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    if (parsed && typeof parsed.decision === "string") {
-      const decision = parsed.decision;
-      if (decision === "confirm" || decision === "cancel" || decision === "other") {
-        return {
-          decision,
-          reason: typeof parsed.reason === "string" ? parsed.reason : "",
-        };
-      }
-    }
-  } catch (err) {
-    // swallow and fall through
-  }
-
-  return { decision: "other", reason: "invalid_ai_response" };
+  return classifyBinaryConfirmation(text, {
+    targetLabel: "종료 진행",
+    confirmRule: "confirm: 종료를 지금 진행하라고 명확히 동의/승인",
+    cancelRule: "cancel: 종료를 하지 말라고 명확히 거부/취소",
+  });
 }
 
 async function classifyPrivilegedConfirmation(text) {
-  const prompt = `
-당신은 디스코드 봇 운영 보조 분류기입니다.
-아래 사용자 메시지가 "실행 진행"에 대한 명확한 확인인지 판단하세요.
-
-규칙:
-- confirm: 실행을 지금 진행하라고 명확히 동의/승인
-- cancel: 실행을 하지 말라고 명확히 거부/취소
-- other: 그 외 모든 경우(애매하면 other)
-- 출력은 JSON 1개만.
-
-출력 형식:
-{"decision":"confirm|cancel|other","reason":"짧은 판단 근거"}
-
-메시지:
-"${String(text || "").replace(/"/g, '\\"')}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    if (parsed && typeof parsed.decision === "string") {
-      const decision = parsed.decision;
-      if (decision === "confirm" || decision === "cancel" || decision === "other") {
-        return {
-          decision,
-          reason: typeof parsed.reason === "string" ? parsed.reason : "",
-        };
-      }
-    }
-  } catch (err) {
-    // swallow and fall through
-  }
-
-  return { decision: "other", reason: "invalid_ai_response" };
+  return classifyBinaryConfirmation(text, {
+    targetLabel: "실행 진행",
+    confirmRule: "confirm: 실행을 지금 진행하라고 명확히 동의/승인",
+    cancelRule: "cancel: 실행을 하지 말라고 명확히 거부/취소",
+  });
 }
 
 async function classifyTargetConfirmation(text) {
-  const prompt = `
-당신은 디스코드 봇 운영 보조 분류기입니다.
-아래 사용자 메시지가 "유저 확인"에 대한 명확한 확인인지 판단하세요.
-
-규칙:
-- confirm: 이 유저가 맞다고 명확히 동의/승인 (예, 응, 맞아, yes 등)
-- cancel: 이 유저가 아니라고 명확히 거부/취소 (아니, 틀려, no 등)
-- other: 그 외 모든 경우(애매하면 other)
-- 출력은 JSON 1개만.
-
-출력 형식:
-{"decision":"confirm|cancel|other","reason":"짧은 판단 근거"}
-
-메시지:
-"${String(text || "").replace(/"/g, '\\"')}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    if (parsed && typeof parsed.decision === "string") {
-      const decision = parsed.decision;
-      if (decision === "confirm" || decision === "cancel" || decision === "other") {
-        return {
-          decision,
-          reason: typeof parsed.reason === "string" ? parsed.reason : "",
-        };
-      }
-    }
-  } catch (err) {
-    // swallow and fall through
-  }
-
-  return { decision: "other", reason: "invalid_ai_response" };
+  return classifyBinaryConfirmation(text, {
+    targetLabel: "유저 확인",
+    confirmRule: "confirm: 이 유저가 맞다고 명확히 동의/승인 (예, 응, 맞아, yes 등)",
+    cancelRule: "cancel: 이 유저가 아니라고 명확히 거부/취소 (아니, 틀려, no 등)",
+  });
 }
 
 async function classifyPowerControlIntent(text) {
@@ -1087,7 +1019,7 @@ client.on("messageCreate", async (message) => {
   const pendingPrivileged = pendingPrivilegedAction.get(pendingKey);
   if (pendingPrivileged) {
     const ageMs = nowMs - pendingPrivileged.requestedAt;
-    if (ageMs > 60_000) {
+    if (ageMs > PRIVILEGED_ACTION_TTL_MS) {
       pendingPrivilegedAction.delete(pendingKey);
       try {
         await pendingPrivileged.statusMessage.edit("확인 시간이 초과되었습니다. 실행이 취소되었습니다.");
@@ -1128,7 +1060,7 @@ client.on("messageCreate", async (message) => {
   const pendingTarget = pendingTargetConfirm.get(pendingKey);
   if (pendingTarget) {
     const ageMs = nowMs - pendingTarget.requestedAt;
-    if (ageMs > 60_000) {
+    if (ageMs > TARGET_CONFIRM_TTL_MS) {
       pendingTargetConfirm.delete(pendingKey);
       try {
         await pendingTarget.statusMessage.edit("확인 시간이 초과되었습니다. 실행이 취소되었습니다.");

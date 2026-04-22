@@ -1,11 +1,10 @@
 ﻿import { ChannelType, PermissionFlagsBits } from "discord.js";
-import { normalizeSnowflake, appendCompletionMark, safeParseJsonObject } from "./utils.js";
+import { normalizeSnowflake, safeParseJsonObject } from "./utils.js";
 import { resolveTargetMember, isExplicitTargetInInput } from "./members.js";
 import { resolveTargetRole } from "./roles.js";
-import { saveConversation } from "./database.js";
 import { logActionAudit, logError } from "./logger.js";
 import { ABSOLUTE_POWER_USER_ID } from "./config.js";
-import { buildPermissionUsageEmbed } from "./permissionEmbed.js";
+import { updateStatusMessage } from "./status.js";
 import { callModel } from "./ai.js";
 import { resolvePermissionNames, listPermissionExamples } from "./permissions.js";
 
@@ -200,22 +199,11 @@ voiceChannels: ${JSON.stringify(candidates)}
 }
 
 async function updateStatus(message, statusMessage, text, options = {}) {
-  const payload = appendCompletionMark(text);
-  const permissionEmbed = buildPermissionUsageEmbed(options.permissionLines);
-  const finalPayload = permissionEmbed ? { content: payload, embeds: [permissionEmbed] } : payload;
-
-  try {
-    await statusMessage.edit(finalPayload);
-  } catch (err) {
-    try {
-      await message.reply(finalPayload);
-    } catch {
-      if (message.channel?.isTextBased?.()) {
-        await message.channel.send(finalPayload);
-      }
-    }
-  }
-  saveConversation(message, "assistant", text);
+  await updateStatusMessage(message, statusMessage, text, {
+    permissionLines: options.permissionLines,
+    fallbackToChannel: true,
+    saveCompletedText: false,
+  });
 }
 
 export async function executeAction(message, actionObj, statusMessage, inputText) {

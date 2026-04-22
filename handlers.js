@@ -1,11 +1,10 @@
 ﻿import { PermissionFlagsBits } from "discord.js";
 import { resolveTargetMember } from "./members.js";
 import { resolveTargetRole } from "./roles.js";
-import { saveConversation } from "./database.js";
-import { buildPermissionUsageEmbed } from "./permissionEmbed.js";
-import { normalizeComparableName, appendCompletionMark } from "./utils.js";
+import { normalizeComparableName } from "./utils.js";
 import { logActionAudit, logError } from "./logger.js";
 import { resolvePermissionNames, listPermissionExamples } from "./permissions.js";
+import { updateStatusMessage } from "./status.js";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -39,16 +38,11 @@ function formatPermissionPreview(permissionNames, title, previewLimit = 18) {
 }
 
 async function updateStatus(message, statusMessage, text, options = {}) {
-  const completedText = appendCompletionMark(text);
-  const permissionEmbed = buildPermissionUsageEmbed(options.permissionLines);
-  const payload = permissionEmbed ? { content: completedText, embeds: [permissionEmbed] } : completedText;
-
-  try {
-    await statusMessage.edit(payload);
-  } catch {
-    await message.reply(payload);
-  }
-  saveConversation(message, "assistant", completedText);
+  await updateStatusMessage(message, statusMessage, text, {
+    permissionLines: options.permissionLines,
+    fallbackToChannel: false,
+    saveCompletedText: true,
+  });
 }
 
 export async function tryHandleServerOwnerLookupQuestion(message, statusMessage) {

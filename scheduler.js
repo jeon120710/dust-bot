@@ -8,6 +8,25 @@ const TRIGGER_ROLE_ID = "1464577978565525679";
 const TARGET_ROLE_ID = "1495322891422662816";
 const CONFIG_PATH = path.resolve(process.cwd(), "scheduler_config.json");
 
+const ROLE_ADD_TIME = { hour: 21, minute: 30 };
+const ROLE_REMOVE_TIME = { hour: 3, minute: 0 };
+
+const SEOUL_TIME_FORMATTER = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Seoul",
+  hour: "numeric",
+  minute: "numeric",
+  hour12: false,
+});
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function formatScheduleLabel(schedule) {
+  const minuteText = String(schedule.minute).padStart(2, "0");
+  return `${schedule.hour}:${minuteText}`;
+}
+
 function getLogChannelId() {
   try {
     if (fs.existsSync(CONFIG_PATH)) {
@@ -26,8 +45,8 @@ export function setLogChannelId(channelId) {
 }
 
 /**
- * 특정 서버의 멤버들에게 역할을 추가하거나 제거합니다.
- * @param {import("discord.js").Client} client 
+ * 특정 서버의 멤버들에게 스케줄에 맞춰 역할을 추가하거나 제거합니다.
+ * @param {import("discord.js").Client} client
  * @param {boolean} isAddition true면 추가, false면 제거
  */
 async function runScheduledRoleUpdate(client, isAddition) {
@@ -35,32 +54,30 @@ async function runScheduledRoleUpdate(client, isAddition) {
     const guild = await client.guilds.fetch(GUILD_ID).catch(() => null);
     if (!guild) return;
 
-    // 모든 멤버 정보를 최신화 (캐시 업데이트)
     await guild.members.fetch().catch(() => null);
     const members = Array.from(guild.members.cache.values());
     let successCount = 0;
+
+    const addReason = `자동 역할 지급 (${formatScheduleLabel(ROLE_ADD_TIME)})`;
+    const removeReason = `자동 역할 회수 (${formatScheduleLabel(ROLE_REMOVE_TIME)})`;
 
     for (const member of members) {
       if (member.user.bot) continue;
 
       try {
         if (isAddition) {
-          // 21:30 - 조건 역할이 있고 대상 역할이 없는 유저에게 부여
           if (member.roles.cache.has(TRIGGER_ROLE_ID) && !member.roles.cache.has(TARGET_ROLE_ID)) {
-            await member.roles.add(TARGET_ROLE_ID, "자동 역할 지급 (21:30)");
-            successCount++;
-            await new Promise((r) => setTimeout(r, 1000)); // API 속도 제한 방지
+            await member.roles.add(TARGET_ROLE_ID, addReason);
+            successCount += 1;
+            await sleep(1000);
           }
-        } else {
-          // 03:00 - 대상 역할을 가진 유저에게서 회수
-          if (member.roles.cache.has(TARGET_ROLE_ID)) {
-            await member.roles.remove(TARGET_ROLE_ID, "자동 역할 회수 (03:00)");
-            successCount++;
-            await new Promise((r) => setTimeout(r, 1000)); // API 속도 제한 방지
-          }
+        } else if (member.roles.cache.has(TARGET_ROLE_ID)) {
+          await member.roles.remove(TARGET_ROLE_ID, removeReason);
+          successCount += 1;
+          await sleep(1000);
         }
-      } catch (err) {
-        // 권한 부족 등 개별 오류는 무시하고 계속 진행
+      } catch {
+        // 권한/위계 문제 등 개별 실패는 무시하고 계속 진행
       }
     }
 
@@ -73,27 +90,28 @@ async function runScheduledRoleUpdate(client, isAddition) {
       });
     }
 
-    // 관리자 채널에 결과 전송 (임베드)
     const logChannelId = getLogChannelId();
-    if (logChannelId) {
-      const logChannel = await client.channels.fetch(logChannelId).catch(() => null);
-      if (logChannel && logChannel.isTextBased()) {
-        const embed = new EmbedBuilder()
-          .setTitle(isAddition ? "🌙 야간 역할 자동 지급 완료" : "☀️ 새벽 역할 자동 회수 완료")
-          .setColor(isAddition ? 0x5865f2 : 0xf1c40f)
-          .addFields(
-            { name: "처리 서버", value: guild.name, inline: true },
-            { name: "대상 역할", value: `<@&${TARGET_ROLE_ID}>`, inline: true },
-            { name: "처리 인원", value: `${successCount}명`, inline: true },
-            { name: "기준 시간", value: isAddition ? "21:30" : "03:00", inline: true }
-          )
-          .setTimestamp()
-          .setFooter({ text: "자동 스케줄러 시스템" });
+    if (!logChannelId) return;
 
-        await logChannel.send({ embeds: [embed] }).catch(() => null);
-      }
-    }
+    const logChannel = await client.channels.fetch(logChannelId).catch(() => null);
+    if (!logChannel || !logChannel.isTextBased()) return;
 
+    const scheduleLabel = isAddition
+      ? formatScheduleLabel(ROLE_ADD_TIME)
+      : formatScheduleLabel(ROLE_REMOVE_TIME);
+    const embed = new EmbedBuilder()
+      .setTitle(isAddition ? "스케줄 역할 지급 완료" : "스케줄 역할 회수 완료")
+      .setColor(isAddition ? 0x5865f2 : 0xf1c40f)
+      .addFields(
+        { name: "처리 서버", value: guild.name, inline: true },
+        { name: "대상 역할", value: `<@&${TARGET_ROLE_ID}>`, inline: true },
+        { name: "처리 인원", value: `${successCount}명`, inline: true },
+        { name: "기준 시간", value: scheduleLabel, inline: true },
+      )
+      .setTimestamp()
+      .setFooter({ text: "자동 스케줄러" });
+
+    await logChannel.send({ embeds: [embed] }).catch(() => null);
   } catch (err) {
     logError("runScheduledRoleUpdate", err);
   }
@@ -101,15 +119,21 @@ async function runScheduledRoleUpdate(client, isAddition) {
 
 export function startRoleScheduler(client) {
   let lastRunKey = "";
+  let isRunning = false;
+
+  async function safeRun(isAddition) {
+    if (isRunning) return;
+    isRunning = true;
+    try {
+      await runScheduledRoleUpdate(client, isAddition);
+    } finally {
+      isRunning = false;
+    }
+  }
 
   setInterval(() => {
     const now = new Date();
-    const parts = new Intl.DateTimeFormat("en-US", {
-      timeZone: "Asia/Seoul",
-      hour: "numeric",
-      minute: "numeric",
-      hour12: false,
-    }).formatToParts(now);
+    const parts = SEOUL_TIME_FORMATTER.formatToParts(now);
 
     const hour = parseInt(parts.find((p) => p.type === "hour").value, 10);
     const minute = parseInt(parts.find((p) => p.type === "minute").value, 10);
@@ -117,8 +141,8 @@ export function startRoleScheduler(client) {
 
     if (lastRunKey !== currentKey) {
       lastRunKey = currentKey;
-      if (hour === 22 && minute === 30) runScheduledRoleUpdate(client, true);
-      if (hour === 1 && minute === 0) runScheduledRoleUpdate(client, false);
+      if (hour === ROLE_ADD_TIME.hour && minute === ROLE_ADD_TIME.minute) safeRun(true);
+      if (hour === ROLE_REMOVE_TIME.hour && minute === ROLE_REMOVE_TIME.minute) safeRun(false);
     }
-  }, 30000); // 30초마다 체크하여 정각 실행 보장
+  }, 30000);
 }

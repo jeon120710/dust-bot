@@ -11,6 +11,27 @@ import { logActionAudit } from "./logger.js";
 
 const activeSpaceExplorations = new Map();
 
+function getDefaultPlanetName() {
+  const names = Object.keys(PLANETS);
+  return names.length > 0 ? names[0] : "";
+}
+
+function parseUnlockedPlanets(rawValue, defaultPlanetName) {
+  try {
+    const parsed = JSON.parse(String(rawValue || "[]"));
+    if (!Array.isArray(parsed)) {
+      return defaultPlanetName ? [defaultPlanetName] : [];
+    }
+    const filtered = parsed.filter((name) => typeof name === "string" && PLANETS[name]);
+    if (filtered.length > 0) {
+      return Array.from(new Set(filtered));
+    }
+  } catch {
+    // fallback below
+  }
+  return defaultPlanetName ? [defaultPlanetName] : [];
+}
+
 export const PLANETS = {
   "지구": { cost: 0, multiplier: 1, baseTime: 30, description: "평화로운 시작의 행성입니다. (기본 30초)" },
   "화성": { cost: 10000, multiplier: 2, baseTime: 60, description: "척박하지만 자원이 풍부한 붉은 행성입니다. (기본 1분)" },
@@ -69,9 +90,10 @@ export async function handleSpaceInteraction(interaction) {
   }
 
   const stats = getUserStats(interaction.guildId, interaction.user.id);
-  const unlockedPlanets = JSON.parse(stats.unlocked_planets);
-  const currentPlanetName = stats.current_planet;
-  const planetData = PLANETS[currentPlanetName] || PLANETS["지구"];
+  const defaultPlanetName = getDefaultPlanetName();
+  const unlockedPlanets = parseUnlockedPlanets(stats.unlocked_planets, defaultPlanetName);
+  const currentPlanetName = PLANETS[stats.current_planet] ? stats.current_planet : defaultPlanetName;
+  const planetData = PLANETS[currentPlanetName] || { multiplier: 1, baseTime: 30 };
 
   if (interaction.commandName === "자산") {
     const embed = new EmbedBuilder()

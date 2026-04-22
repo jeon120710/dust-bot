@@ -483,7 +483,7 @@ async function tryGenerateWithRetries(modelName, prompt, options = {}) {
 export async function callModel(prompt, options = {}) {
   const { useWebSearch = false, returnMeta = false, channel } = options;
   if (channel) {
-    channel.sendTyping();
+    channel.sendTyping().catch(() => {});
   }
   ensureUsageStateLoaded();
   await prepareModels();
