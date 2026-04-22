@@ -7,6 +7,7 @@ import {
   SlashCommandBuilder
 } from "discord.js";
 import { addUserPoints, getUserStats, updateUserStats, upgradeUserSpeed, upgradeUserArmor } from "./assets.js";
+import { logActionAudit } from "./logger.js";
 
 const activeSpaceExplorations = new Map();
 
@@ -43,7 +44,12 @@ export const SPACE_COMMANDS = [
     .setDescription("포인트를 사용하여 탐사 시간을 단축합니다."),
   new SlashCommandBuilder()
     .setName("수리강화")
-    .setDescription("포인트를 사용하여 기체 파손 확률을 낮춥니다.")
+    .setDescription("포인트를 사용하여 기체 파손 확률을 낮춥니다."),
+  new SlashCommandBuilder()
+    .setName("송금")
+    .setDescription("다른 유저에게 포인트를 보냅니다.")
+    .addUserOption(opt => opt.setName("대상").setDescription("포인트를 받을 유저").setRequired(true))
+    .addIntegerOption(opt => opt.setName("금액").setDescription("보낼 포인트 양").setRequired(true).setMinValue(1))
 ].map(cmd => cmd.toJSON());
 
 /**
@@ -124,6 +130,48 @@ export async function handleSpaceInteraction(interaction) {
       
       return interaction.reply({ content: `🌟 성공적으로 **${target}** 행성을 해금했습니다! (지불: ${cost.toLocaleString()}P)` });
     }
+  }
+
+  if (interaction.commandName === "송금") {
+    const targetUser = interaction.options.getUser("대상");
+    const amount = interaction.options.getInteger("금액");
+
+    if (targetUser.id === interaction.user.id) {
+      return interaction.reply({ content: "자기 자신에게는 송금할 수 없습니다.", flags: MessageFlags.Ephemeral });
+    }
+    if (targetUser.bot) {
+      return interaction.reply({ content: "봇에게는 송금할 수 없습니다.", flags: MessageFlags.Ephemeral });
+    }
+    if (stats.points < amount) {
+      return interaction.reply({ 
+        content: `포인트가 부족합니다. (보유: ${stats.points.toLocaleString()}P / 필요: ${amount.toLocaleString()}P)`, 
+        flags: MessageFlags.Ephemeral 
+      });
+    }
+
+    addUserPoints(interaction.guildId, interaction.user.id, -amount);
+    addUserPoints(interaction.guildId, targetUser.id, amount);
+
+    logActionAudit({
+      phase: "success",
+      action: "space.transfer",
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      targetUserId: targetUser.id,
+      amount: amount,
+    });
+
+    const embed = new EmbedBuilder()
+      .setTitle("💸 포인트 송금 완료")
+      .setDescription(`<@${interaction.user.id}>님이 <@${targetUser.id}>님에게 포인트를 보냈습니다.`)
+      .addFields(
+        { name: "송금 금액", value: `**${amount.toLocaleString()}** P`, inline: true },
+        { name: "나의 잔액", value: `**${(stats.points - amount).toLocaleString()}** P`, inline: true }
+      )
+      .setColor(0x2ECC71)
+      .setTimestamp();
+
+    return interaction.reply({ embeds: [embed] });
   }
 
   // 엔진 및 수리 강화 통합 처리 로직
