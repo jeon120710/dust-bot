@@ -39,6 +39,19 @@ export const PLANETS = {
   "안드로메다": { cost: 250000, multiplier: 20, baseTime: 600, description: "심우주의 끝자락, 전설적인 보물이 잠들어 있습니다. (기본 10분)" }
 };
 
+const EXPLORATION_FAILURE_EVENTS = [
+  { title: "☄️ 탐사 실패 (블랙홀)", reason: "블랙홀의 중력에 휘말려 비상 탈출만 간신히 성공했습니다." },
+  { title: "☄️ 탐사 실패 (소행성 폭풍)", reason: "예상치 못한 소행성 폭풍으로 채굴 구역 진입에 실패했습니다." },
+  { title: "☄️ 탐사 실패 (태양 플레어)", reason: "강력한 태양 플레어로 센서가 마비되어 귀환을 선택했습니다." },
+  { title: "☄️ 탐사 실패 (엔진 과열)", reason: "장거리 항해 중 엔진 온도가 한계치를 넘어 임무를 중단했습니다." },
+  { title: "☄️ 탐사 실패 (항법 오류)", reason: "중력 교란으로 항법 좌표가 틀어져 목표 지점에 도달하지 못했습니다." },
+  { title: "☄️ 탐사 실패 (통신 두절)", reason: "우주 전파 간섭으로 관제와의 통신이 끊겨 즉시 복귀했습니다." },
+  { title: "☄️ 탐사 실패 (연료 누출)", reason: "연료 누출 경고가 발생해 안전 절차에 따라 탐사를 포기했습니다." },
+  { title: "☄️ 탐사 실패 (우주 해적 조우)", reason: "미확인 약탈선과 조우해 전투를 피하고 후퇴했습니다." },
+  { title: "☄️ 탐사 실패 (방사선 폭증)", reason: "고에너지 방사선 수치가 급상승해 장비 보호를 위해 철수했습니다." },
+  { title: "☄️ 탐사 실패 (중력 난류)", reason: "불안정한 중력 난류로 착륙 시퀀스가 무너져 탐사에 실패했습니다." }
+];
+
 export const SPACE_COMMANDS = [
   new SlashCommandBuilder()
     .setName("우주탐사")
@@ -334,9 +347,10 @@ export async function handleSpaceInteraction(interaction) {
     embed.addFields({ name: "현재 보유 포인트", value: `💰 **${totalPoints.toLocaleString()}** 포인트` });
 
   } else {
-    // 실패 시 (블랙홀)
+    // 실패 시 (랜덤 실패 이벤트)
     const repairRoll = Math.random();
     let repairText = "";
+    const failureEvent = EXPLORATION_FAILURE_EVENTS[Math.floor(Math.random() * EXPLORATION_FAILURE_EVENTS.length)];
 
     // 기본 파손 확률 40%, 방호 레벨당 4%씩 감소 (최소 4% 유지)
     const repairProb = Math.max(0.04, 0.4 - (stats.armor_level * 0.04));
@@ -350,8 +364,8 @@ export async function handleSpaceInteraction(interaction) {
       embed.setColor(0xFF0000);
     }
 
-    embed.setTitle("☄️ 탐사 실패 (블랙홀)")
-      .setDescription(`블랙홀의 중력에 휘말려 아무것도 얻지 못했습니다...\n(판정: ${roll} >= ${threshold} / 파손 확률: ${Math.round(repairProb * 100)}%)${repairText}`);
+    embed.setTitle(failureEvent.title)
+      .setDescription(`${failureEvent.reason}\n(판정: ${roll} >= ${threshold} / 파손 확률: ${Math.round(repairProb * 100)}%)${repairText}`);
   }
 
   // 버튼 추가 (재탐사를 유도하는 버튼)
