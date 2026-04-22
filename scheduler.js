@@ -117,7 +117,7 @@ export function startRoleScheduler(client) {
 
     if (lastRunKey !== currentKey) {
       lastRunKey = currentKey;
-      if (hour === 22 && minute === 25) runScheduledRoleUpdate(client, true);
+      if (hour === 22 && minute === 30) runScheduledRoleUpdate(client, true);
       if (hour === 1 && minute === 0) runScheduledRoleUpdate(client, false);
     }
   }, 30000); // 30초마다 체크하여 정각 실행 보장
