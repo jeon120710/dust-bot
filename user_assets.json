@@ -1,39 +1,60 @@
 {
   "1464563536561967233": {
     "1269575955626725390": {
-      "points": 99999078010,
+      "points": 99999064970,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
       "armor_level": 0
     },
     "624851037857120286": {
-      "points": 16849,
-      "unlocked_planets": "[\"지구\",\"화성\"]",
-      "current_planet": "지구",
-      "speed_level": 1,
-      "armor_level": 1
+      "points": 52263,
+      "unlocked_planets": "[\"지구\",\"화성\",\"목성\"]",
+      "current_planet": "목성",
+      "speed_level": 6,
+      "armor_level": 2
     },
     "1434076875025813644": {
-      "points": 22634,
+      "points": 14836,
       "unlocked_planets": "[\"지구\",\"화성\"]",
       "current_planet": "화성",
-      "speed_level": 0,
-      "armor_level": 0
+      "speed_level": 2,
+      "armor_level": 1
     },
     "846701362393776138": {
-      "points": 1005869,
+      "points": 10115549,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
       "armor_level": 9
     },
     "1012873421211828304": {
-      "points": 3186108,
+      "points": 13095868,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
       "armor_level": 9
+    },
+    "913319144915603487": {
+      "points": 200161,
+      "unlocked_planets": "[\"지구\",\"안드로메다\"]",
+      "current_planet": "안드로메다",
+      "speed_level": 9,
+      "armor_level": 9
+    },
+    "1359830886065115277": {
+      "points": 50329,
+      "unlocked_planets": "[\"지구\"]",
+      "current_planet": "지구",
+      "speed_level": 0,
+      "armor_level": 0
+    },
+    "427776391912620062": {
+      "points": 0,
+      "unlocked_planets": "[\"지구\"]",
+      "current_planet": "지구",
+      "speed_level": 0,
+      "armor_level": 0
     }
   }
 }

@@ -502,7 +502,7 @@ function normalizeCallModelResult(result) {
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_SAFE_CHUNK = 1900;
 const CHANNEL_CONTEXT_FETCH_LIMIT = 15;
-const CHANNEL_CONTEXT_USE_LIMIT = 6;
+const CHANNEL_CONTEXT_USE_LIMIT = 10;
 const CHANNEL_CONTEXT_LINE_LIMIT = 180;
 const CODE_CONTEXT_MAX_SNIPPETS = 6;
 const CODE_CONTEXT_MAX_LINE_LEN = 180;
@@ -765,15 +765,20 @@ function getRecentCodeContextForPrompt(plan) {
 }
 
 function buildChannelContextLine(msg) {
+  const time = new Date(msg.createdTimestamp).toLocaleString("ko-KR", {
+    timeZone: "Asia/Seoul",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
   const displayName = msg.member?.displayName || msg.author?.globalName || msg.author?.username || "unknown";
   const text = truncateForPrompt(msg.content);
   if (text) {
-    return `${displayName}: ${text}`;
+    return `[${time}] ${displayName}: ${text}`;
   }
 
   const attachmentCount = Number(msg.attachments?.size || 0);
   if (attachmentCount > 0) {
-    return `${displayName}: [attachment ${attachmentCount}]`;
+    return `[${time}] ${displayName}: [첨부파일 ${attachmentCount}개]`;
   }
 
   return "";
@@ -792,7 +797,6 @@ async function getRecentChannelContextForPrompt(message, options = {}) {
     const items = Array.from(fetched.values())
       .filter((msg) => msg && msg.id !== message.id)
       .filter((msg) => !msg.system)
-      .filter((msg) => !msg.author?.bot)
       .sort((a, b) => Number(a.createdTimestamp || 0) - Number(b.createdTimestamp || 0));
 
     const lines = items
