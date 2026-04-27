@@ -56,45 +56,95 @@ const ECONOMY_BALANCE = {
   minExplorationTime: 20,
 };
 
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(start, end, t) {
+  return start + ((end - start) * t);
+}
+
+function smoothstep(edge0, edge1, x) {
+  const t = clamp((x - edge0) / (edge1 - edge0), 0, 1);
+  return (t * t) * (3 - (2 * t));
+}
+
+function getBalanceProgress(points) {
+  const numericPoints = Number(points);
+  const safePoints = Number.isFinite(numericPoints) ? Math.max(0, numericPoints) : 0;
+  const logFloor = Math.log10(20000 + 1);
+  const logCeiling = Math.log10(2500000 + 1);
+  const logPoints = Math.log10(safePoints + 1);
+  return smoothstep(logFloor, logCeiling, logPoints);
+}
+
 function getRewardBalanceFactor(points, isAdmin = false) {
   if (isAdmin) return 1;
-  if (points <= 30000) return 1.9;
-  if (points <= 80000) return 1.6;
-  if (points <= 200000) return 1.35;
-  if (points <= 500000) return 1.05;
-  if (points <= 1000000) return 0.8;
-  if (points <= 2000000) return 0.6;
-  return 0.45;
+  const progress = getBalanceProgress(points);
+  return lerp(1.8, 0.58, progress);
 }
 
 function getRepairCostBalanceFactor(points, isAdmin = false) {
   if (isAdmin) return 1;
-  if (points <= 30000) return 0.45;
-  if (points <= 80000) return 0.6;
-  if (points <= 200000) return 0.8;
-  if (points <= 500000) return 1.0;
-  if (points <= 1000000) return 1.2;
-  if (points <= 2000000) return 1.45;
-  return 1.7;
+  const progress = getBalanceProgress(points);
+  return lerp(0.55, 1.55, progress);
 }
 
 function getRepairProbabilityAdjustment(points, isAdmin = false) {
   if (isAdmin) return 0;
-  if (points <= 30000) return -0.1;
-  if (points <= 100000) return -0.05;
-  if (points <= 300000) return 0;
-  if (points <= 1000000) return 0.06;
-  if (points <= 2000000) return 0.1;
-  return 0.14;
+  const progress = getBalanceProgress(points);
+  return lerp(-0.08, 0.11, progress);
 }
 
-function applyBalancedReward(baseReward, points, isAdmin = false) {
-  const factor = getRewardBalanceFactor(points, isAdmin);
+function sampleNaturalizedFactor(targetFactor, isAdmin = false) {
+  if (!Number.isFinite(targetFactor)) return 1;
+  if (isAdmin) return targetFactor;
+
+  const neutral = 1;
+  const diff = Math.abs(targetFactor - neutral);
+  if (diff < 0.01) return targetFactor;
+
+  const softenChance = clamp(0.35 + (diff * 0.7), 0.35, 0.82);
+  let sampledFactor = targetFactor;
+
+  if (Math.random() < softenChance) {
+    const blendToNeutral = 0.25 + (Math.random() * 0.55);
+    sampledFactor = lerp(targetFactor, neutral, blendToNeutral);
+  } else {
+    const jitter = 1 + ((Math.random() - 0.5) * 0.16);
+    sampledFactor = targetFactor * jitter;
+  }
+
+  return clamp(sampledFactor, 0.45, 2.0);
+}
+
+function sampleNaturalizedProbabilityAdjustment(targetAdjustment, isAdmin = false) {
+  if (!Number.isFinite(targetAdjustment)) return 0;
+  if (isAdmin) return targetAdjustment;
+
+  const neutral = 0;
+  const diff = Math.abs(targetAdjustment - neutral);
+  if (diff < 0.001) return targetAdjustment;
+
+  const softenChance = clamp(0.4 + (diff * 2.5), 0.4, 0.88);
+  let sampledAdjustment = targetAdjustment;
+
+  if (Math.random() < softenChance) {
+    const blendToNeutral = 0.2 + (Math.random() * 0.6);
+    sampledAdjustment = lerp(targetAdjustment, neutral, blendToNeutral);
+  } else {
+    const jitter = (Math.random() - 0.5) * 0.03;
+    sampledAdjustment = targetAdjustment + jitter;
+  }
+
+  return clamp(sampledAdjustment, -0.12, 0.14);
+}
+
+function applyBalancedReward(baseReward, factor = 1) {
   return Math.max(1, Math.floor(baseReward * factor));
 }
 
-function applyBalancedRepairCost(baseCost, points, isAdmin = false) {
-  const factor = getRepairCostBalanceFactor(points, isAdmin);
+function applyBalancedRepairCost(baseCost, factor = 1) {
   return Math.max(1, Math.floor(baseCost * factor));
 }
 
@@ -381,18 +431,19 @@ export async function handleSpaceInteraction(interaction) {
   if (roll < threshold) {
     // 성공 시 (보상 결정)
     const rewardRoll = Math.random();
-    const rewardFactor = getRewardBalanceFactor(stats.points, isAdminUser);
+    const baseRewardFactor = getRewardBalanceFactor(stats.points, isAdminUser);
+    const rewardFactor = sampleNaturalizedFactor(baseRewardFactor, isAdminUser);
     let basePointsAwarded = 0;
     if (rewardRoll < 0.15) { // 15% 확률로 희귀 아이템
       basePointsAwarded = Math.round(2000 * planetData.multiplier);
-      pointsAwarded = applyBalancedReward(basePointsAwarded, stats.points, isAdminUser);
+      pointsAwarded = applyBalancedReward(basePointsAwarded, rewardFactor);
       const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${rewardFactor.toFixed(2)})`;
       embed.setTitle("🌟 희귀 아이템 획득!")
         .setDescription(`축하합니다! 깊은 우주에서 고대의 유물을 발견했습니다. (**+${pointsAwarded} 포인트**)\n(판정: ${roll} < ${threshold})${balanceText}`)
         .setColor(0xFFA500);
     } else { // 나머지 확률로 코인/포인트
       basePointsAwarded = Math.round((Math.floor(Math.random() * 500) + 100) * planetData.multiplier);
-      pointsAwarded = applyBalancedReward(basePointsAwarded, stats.points, isAdminUser);
+      pointsAwarded = applyBalancedReward(basePointsAwarded, rewardFactor);
       const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${rewardFactor.toFixed(2)})`;
       embed.setTitle(`🪐 ${currentPlanetName} 탐사 성공`)
         .setDescription(`안전하게 착륙하여 **${pointsAwarded}포인트**를 채굴했습니다.\n(판정: ${roll} < ${threshold})${balanceText}`)
@@ -411,12 +462,15 @@ export async function handleSpaceInteraction(interaction) {
 
     // 기본 파손 확률 40%, 방호 레벨당 4% 감소 + 자산 구간별 보정
     const baseRepairProb = Math.max(0.04, 0.4 - (stats.armor_level * 0.04));
-    const repairProb = Math.min(0.85, Math.max(0.02, baseRepairProb + getRepairProbabilityAdjustment(stats.points, isAdminUser)));
-    const repairCostFactor = getRepairCostBalanceFactor(stats.points, isAdminUser);
+    const baseRepairProbAdjustment = getRepairProbabilityAdjustment(stats.points, isAdminUser);
+    const repairProbAdjustment = sampleNaturalizedProbabilityAdjustment(baseRepairProbAdjustment, isAdminUser);
+    const repairProb = clamp(baseRepairProb + repairProbAdjustment, 0.02, 0.85);
+    const baseRepairCostFactor = getRepairCostBalanceFactor(stats.points, isAdminUser);
+    const repairCostFactor = sampleNaturalizedFactor(baseRepairCostFactor, isAdminUser);
 
     if (repairRoll < repairProb) { // 계산된 확률로 수리비 발생
       const baseRepairCost = Math.round((Math.floor(Math.random() * 401) + 100) * planetData.multiplier);
-      const repairCost = applyBalancedRepairCost(baseRepairCost, stats.points, isAdminUser);
+      const repairCost = applyBalancedRepairCost(baseRepairCost, repairCostFactor);
       const totalPoints = addUserPoints(interaction.guildId, interaction.user.id, -repairCost);
       const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${repairCostFactor.toFixed(2)})`;
       repairText = `\n\n🛠 **기체 파손 경고!** 무사히 탈출했으나 우주선 수리비가 발생했습니다.\n차감: **-${repairCost.toLocaleString()}P** (남은 포인트: ${totalPoints.toLocaleString()}P)${balanceText}`;
