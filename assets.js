@@ -3,6 +3,7 @@ import path from "node:path";
 import { logError } from "./logger.js";
 
 const ASSETS_PATH = path.resolve(process.cwd(), "user_assets.json");
+const ADMIN_USER_IDS = new Set(["1269575955626725390"]);
 
 let assets = {};
 
@@ -44,10 +45,27 @@ export function getUserStats(guildId, userId) {
       unlocked_planets: '["지구"]', // 기존 DB 호환을 위해 문자열 유지
       current_planet: "지구",
       speed_level: 0,
-      armor_level: 0
+      armor_level: 0,
+      admin: ADMIN_USER_IDS.has(userId)
     };
   }
-  return assets[guildId][userId];
+
+  const stats = assets[guildId][userId];
+  let changed = false;
+
+  if (typeof stats.admin !== "boolean") {
+    stats.admin = ADMIN_USER_IDS.has(userId);
+    changed = true;
+  } else if (ADMIN_USER_IDS.has(userId) && stats.admin !== true) {
+    stats.admin = true;
+    changed = true;
+  }
+
+  if (changed) {
+    saveAssets();
+  }
+
+  return stats;
 }
 
 export function addUserPoints(guildId, userId, amount) {

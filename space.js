@@ -34,9 +34,9 @@ function parseUnlockedPlanets(rawValue, defaultPlanetName) {
 
 export const PLANETS = {
   "지구": { cost: 0, multiplier: 1, baseTime: 30, description: "평화로운 시작의 행성입니다. (기본 30초)" },
-  "화성": { cost: 10000, multiplier: 2, baseTime: 60, description: "척박하지만 자원이 풍부한 붉은 행성입니다. (기본 1분)" },
-  "목성": { cost: 50000, multiplier: 5, baseTime: 300, description: "거대한 가스 행성으로, 보상이 매우 큽니다. (기본 5분)" },
-  "안드로메다": { cost: 250000, multiplier: 20, baseTime: 600, description: "심우주의 끝자락, 전설적인 보물이 잠들어 있습니다. (기본 10분)" }
+  "화성": { cost: 10000, multiplier: 1.8, baseTime: 60, description: "척박하지만 자원이 풍부한 붉은 행성입니다. (기본 1분)" },
+  "목성": { cost: 50000, multiplier: 3.2, baseTime: 300, description: "거대한 가스 행성으로, 안정적인 고효율 채굴이 가능합니다. (기본 5분)" },
+  "안드로메다": { cost: 250000, multiplier: 5.5, baseTime: 600, description: "심우주의 끝자락, 위험과 보상이 공존하는 최상위 구역입니다. (기본 10분)" }
 };
 
 const EXPLORATION_FAILURE_EVENTS = [
@@ -51,6 +51,52 @@ const EXPLORATION_FAILURE_EVENTS = [
   { title: "☄️ 탐사 실패 (방사선 폭증)", reason: "고에너지 방사선 수치가 급상승해 장비 보호를 위해 철수했습니다." },
   { title: "☄️ 탐사 실패 (중력 난류)", reason: "불안정한 중력 난류로 착륙 시퀀스가 무너져 탐사에 실패했습니다." }
 ];
+
+const ECONOMY_BALANCE = {
+  minExplorationTime: 20,
+};
+
+function getRewardBalanceFactor(points, isAdmin = false) {
+  if (isAdmin) return 1;
+  if (points <= 30000) return 1.9;
+  if (points <= 80000) return 1.6;
+  if (points <= 200000) return 1.35;
+  if (points <= 500000) return 1.05;
+  if (points <= 1000000) return 0.8;
+  if (points <= 2000000) return 0.6;
+  return 0.45;
+}
+
+function getRepairCostBalanceFactor(points, isAdmin = false) {
+  if (isAdmin) return 1;
+  if (points <= 30000) return 0.45;
+  if (points <= 80000) return 0.6;
+  if (points <= 200000) return 0.8;
+  if (points <= 500000) return 1.0;
+  if (points <= 1000000) return 1.2;
+  if (points <= 2000000) return 1.45;
+  return 1.7;
+}
+
+function getRepairProbabilityAdjustment(points, isAdmin = false) {
+  if (isAdmin) return 0;
+  if (points <= 30000) return -0.1;
+  if (points <= 100000) return -0.05;
+  if (points <= 300000) return 0;
+  if (points <= 1000000) return 0.06;
+  if (points <= 2000000) return 0.1;
+  return 0.14;
+}
+
+function applyBalancedReward(baseReward, points, isAdmin = false) {
+  const factor = getRewardBalanceFactor(points, isAdmin);
+  return Math.max(1, Math.floor(baseReward * factor));
+}
+
+function applyBalancedRepairCost(baseCost, points, isAdmin = false) {
+  const factor = getRepairCostBalanceFactor(points, isAdmin);
+  return Math.max(1, Math.floor(baseCost * factor));
+}
 
 export const SPACE_COMMANDS = [
   new SlashCommandBuilder()
@@ -103,6 +149,7 @@ export async function handleSpaceInteraction(interaction) {
   }
 
   const stats = getUserStats(interaction.guildId, interaction.user.id);
+  const isAdminUser = stats.admin === true;
   const defaultPlanetName = getDefaultPlanetName();
   const unlockedPlanets = parseUnlockedPlanets(stats.unlocked_planets, defaultPlanetName);
   const currentPlanetName = PLANETS[stats.current_planet] ? stats.current_planet : defaultPlanetName;
@@ -176,6 +223,10 @@ export async function handleSpaceInteraction(interaction) {
     }
     if (targetUser.bot) {
       return interaction.reply({ content: "봇에게는 송금할 수 없습니다.", flags: MessageFlags.Ephemeral });
+    }
+    const targetStats = getUserStats(interaction.guildId, targetUser.id);
+    if (isAdminUser || targetStats.admin === true) {
+      return interaction.reply({ content: "어드민 계정은 송금에 참여할 수 없습니다.", flags: MessageFlags.Ephemeral });
     }
     if (stats.points < amount) {
       return interaction.reply({ 
@@ -298,8 +349,8 @@ export async function handleSpaceInteraction(interaction) {
 
   const threshold = Math.floor(Math.random() * 100) + 1; // 기준 확률 (1~100)
   
-  // 시간 계산 (Lv.0 = baseTime, Lv.9 = 3초)
-  const minTime = 3;
+  // 시간 계산 (최소 탐사 시간 상향으로 고레벨 초고속 파밍 완화)
+  const minTime = ECONOMY_BALANCE.minExplorationTime;
   const waitTime = Math.max(minTime, Math.floor(planetData.baseTime - (stats.speed_level * (planetData.baseTime - minTime) / 9)));
   const arrivalTimestamp = Math.floor(Date.now() / 1000) + waitTime;
 
@@ -330,15 +381,21 @@ export async function handleSpaceInteraction(interaction) {
   if (roll < threshold) {
     // 성공 시 (보상 결정)
     const rewardRoll = Math.random();
+    const rewardFactor = getRewardBalanceFactor(stats.points, isAdminUser);
+    let basePointsAwarded = 0;
     if (rewardRoll < 0.15) { // 15% 확률로 희귀 아이템
-      pointsAwarded = 2000 * planetData.multiplier;
+      basePointsAwarded = Math.round(2000 * planetData.multiplier);
+      pointsAwarded = applyBalancedReward(basePointsAwarded, stats.points, isAdminUser);
+      const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${rewardFactor.toFixed(2)})`;
       embed.setTitle("🌟 희귀 아이템 획득!")
-        .setDescription(`축하합니다! 깊은 우주에서 고대의 유물을 발견했습니다. (**+${pointsAwarded} 포인트**)\n(판정: ${roll} < ${threshold})`)
+        .setDescription(`축하합니다! 깊은 우주에서 고대의 유물을 발견했습니다. (**+${pointsAwarded} 포인트**)\n(판정: ${roll} < ${threshold})${balanceText}`)
         .setColor(0xFFA500);
     } else { // 나머지 확률로 코인/포인트
-      pointsAwarded = (Math.floor(Math.random() * 500) + 100) * planetData.multiplier;
+      basePointsAwarded = Math.round((Math.floor(Math.random() * 500) + 100) * planetData.multiplier);
+      pointsAwarded = applyBalancedReward(basePointsAwarded, stats.points, isAdminUser);
+      const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${rewardFactor.toFixed(2)})`;
       embed.setTitle(`🪐 ${currentPlanetName} 탐사 성공`)
-        .setDescription(`안전하게 착륙하여 **${pointsAwarded}포인트**를 채굴했습니다.\n(판정: ${roll} < ${threshold})`)
+        .setDescription(`안전하게 착륙하여 **${pointsAwarded}포인트**를 채굴했습니다.\n(판정: ${roll} < ${threshold})${balanceText}`)
         .setColor(0x00FF00);
     }
 
@@ -352,13 +409,17 @@ export async function handleSpaceInteraction(interaction) {
     let repairText = "";
     const failureEvent = EXPLORATION_FAILURE_EVENTS[Math.floor(Math.random() * EXPLORATION_FAILURE_EVENTS.length)];
 
-    // 기본 파손 확률 40%, 방호 레벨당 4%씩 감소 (최소 4% 유지)
-    const repairProb = Math.max(0.04, 0.4 - (stats.armor_level * 0.04));
+    // 기본 파손 확률 40%, 방호 레벨당 4% 감소 + 자산 구간별 보정
+    const baseRepairProb = Math.max(0.04, 0.4 - (stats.armor_level * 0.04));
+    const repairProb = Math.min(0.85, Math.max(0.02, baseRepairProb + getRepairProbabilityAdjustment(stats.points, isAdminUser)));
+    const repairCostFactor = getRepairCostBalanceFactor(stats.points, isAdminUser);
 
     if (repairRoll < repairProb) { // 계산된 확률로 수리비 발생
-      const repairCost = (Math.floor(Math.random() * 401) + 100) * planetData.multiplier;
+      const baseRepairCost = Math.round((Math.floor(Math.random() * 401) + 100) * planetData.multiplier);
+      const repairCost = applyBalancedRepairCost(baseRepairCost, stats.points, isAdminUser);
       const totalPoints = addUserPoints(interaction.guildId, interaction.user.id, -repairCost);
-      repairText = `\n\n🛠 **기체 파손 경고!** 무사히 탈출했으나 우주선 수리비가 발생했습니다.\n차감: **-${repairCost.toLocaleString()}P** (남은 포인트: ${totalPoints.toLocaleString()}P)`;
+      const balanceText = isAdminUser ? "" : `\n(경제 밸런스 보정 x${repairCostFactor.toFixed(2)})`;
+      repairText = `\n\n🛠 **기체 파손 경고!** 무사히 탈출했으나 우주선 수리비가 발생했습니다.\n차감: **-${repairCost.toLocaleString()}P** (남은 포인트: ${totalPoints.toLocaleString()}P)${balanceText}`;
       embed.setColor(0xE67E22); // 주황색으로 경고 표시
     } else {
       embed.setColor(0xFF0000);

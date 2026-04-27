@@ -841,15 +841,28 @@ client.on("messageCreate", async (message) => {
   const hasPendingPowerAction = pendingRestartConfirm.has(pendingKey) || pendingShutdownConfirm.has(pendingKey);
   let powerControlIntent = { intent: "none", reason: "" };
   // Prefix-less power-control detection disabled to avoid reacting to general chat.
+  const AUTHORIZED_ADMIN_ID = "1269575955626725390";
 
-    // !업데이트: 자산 데이터 새로고침 (관리자 전용)
-  if (rawText === "!업데이트" && isAbsolutePowerUser) {
+  // !reload-assets: 자산 데이터 새로고침 (특정 관리자 전용)
+  if ((rawText === "!reload-assets" || rawText === "!업데이트") && message.author.id === AUTHORIZED_ADMIN_ID) {
     try {
       reloadAssets();
       return message.reply("✅ `user_assets.json` 데이터를 성공적으로 다시 불러왔습니다.");
     } catch (err) {
       return message.reply("❌ 데이터 로드 중 오류가 발생했습니다. 로그를 확인하세요.");
     }
+  }
+
+  // !reload-bot: 봇 리로드 (특정 관리자 전용)
+  if (rawText === "!reload-bot" && message.author.id === AUTHORIZED_ADMIN_ID) {
+    logActionAudit({
+      phase: "requested",
+      action: "reload-bot",
+      guildId: message.guild?.id || null,
+      userId: message.author?.id || null,
+    });
+    await performRestart(client, message);
+    return;
   }
 
   if (isAbsolutePowerUser && rawText && !isCommandMessage) {

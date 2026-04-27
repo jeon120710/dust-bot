@@ -5,7 +5,8 @@
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": true
     },
     "624851037857120286": {
       "points": 16849,
