@@ -68,6 +68,32 @@ export function getUserStats(guildId, userId) {
   return stats;
 }
 
+function percentile(sortedValues, percentileRank) {
+  if (sortedValues.length === 0) return 0;
+  const index = (sortedValues.length - 1) * percentileRank;
+  const lower = Math.floor(index);
+  const upper = Math.ceil(index);
+  if (lower === upper) return sortedValues[lower];
+  return sortedValues[lower] + ((sortedValues[upper] - sortedValues[lower]) * (index - lower));
+}
+
+export function getGuildEconomySnapshot(guildId) {
+  const guildAssets = assets[guildId] || {};
+  const points = Object.values(guildAssets)
+    .filter((stats) => stats && stats.admin !== true)
+    .map((stats) => Number(stats.points))
+    .filter((value) => Number.isFinite(value) && value >= 0)
+    .sort((a, b) => a - b);
+
+  return {
+    count: points.length,
+    p25: percentile(points, 0.25),
+    median: percentile(points, 0.5),
+    p75: percentile(points, 0.75),
+    p90: percentile(points, 0.9),
+  };
+}
+
 export function addUserPoints(guildId, userId, amount) {
   const stats = getUserStats(guildId, userId);
   stats.points += amount;

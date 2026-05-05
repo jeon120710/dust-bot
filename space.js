@@ -6,7 +6,7 @@ import {
   MessageFlags,
   SlashCommandBuilder
 } from "discord.js";
-import { addUserPoints, getUserStats, updateUserStats, upgradeUserSpeed, upgradeUserArmor } from "./assets.js";
+import { addUserPoints, getGuildEconomySnapshot, getUserStats, updateUserStats, upgradeUserSpeed, upgradeUserArmor } from "./assets.js";
 import { logActionAudit } from "./logger.js";
 
 const activeSpaceExplorations = new Map();
@@ -54,6 +54,13 @@ const EXPLORATION_FAILURE_EVENTS = [
 
 const ECONOMY_BALANCE = {
   minExplorationTime: 20,
+  minimumEconomySampleSize: 4,
+  lowWealthRewardFactor: 1.24,
+  highWealthRewardFactor: 0.86,
+  lowWealthRepairCostFactor: 0.88,
+  highWealthRepairCostFactor: 1.16,
+  lowWealthRepairProbabilityAdjustment: -0.025,
+  highWealthRepairProbabilityAdjustment: 0.035,
 };
 
 function clamp(value, min, max) {
@@ -69,31 +76,61 @@ function smoothstep(edge0, edge1, x) {
   return (t * t) * (3 - (2 * t));
 }
 
-function getBalanceProgress(points) {
+function getLogPoint(value) {
+  return Math.log10(Math.max(0, Number(value) || 0) + 1);
+}
+
+function getBalancePosition(points, economySnapshot) {
   const numericPoints = Number(points);
   const safePoints = Number.isFinite(numericPoints) ? Math.max(0, numericPoints) : 0;
-  const logFloor = Math.log10(20000 + 1);
-  const logCeiling = Math.log10(2500000 + 1);
-  const logPoints = Math.log10(safePoints + 1);
-  return smoothstep(logFloor, logCeiling, logPoints);
+
+  let lowAnchor = 20000;
+  let centerAnchor = 250000;
+  let highAnchor = 2500000;
+
+  if (economySnapshot?.count >= ECONOMY_BALANCE.minimumEconomySampleSize && economySnapshot.median > 0) {
+    centerAnchor = economySnapshot.median;
+    lowAnchor = Math.max(1, Math.min(economySnapshot.p25, centerAnchor * 0.45));
+    highAnchor = Math.max(economySnapshot.p90, centerAnchor * 1.8, centerAnchor + 1);
+  }
+
+  const logPoints = getLogPoint(safePoints);
+  const logLow = getLogPoint(Math.min(lowAnchor, centerAnchor - 1));
+  const logCenter = getLogPoint(centerAnchor);
+  const logHigh = getLogPoint(Math.max(highAnchor, centerAnchor + 1));
+
+  if (logPoints < logCenter) {
+    return -1 + smoothstep(logLow, logCenter, logPoints);
+  }
+  return smoothstep(logCenter, logHigh, logPoints);
 }
 
-function getRewardBalanceFactor(points, isAdmin = false) {
+function getBalanceFactorFromPosition(position, lowWealthFactor, highWealthFactor) {
+  if (position < 0) {
+    return lerp(1, lowWealthFactor, Math.abs(position));
+  }
+  return lerp(1, highWealthFactor, position);
+}
+
+function getRewardBalanceFactor(points, economySnapshot, isAdmin = false) {
   if (isAdmin) return 1;
-  const progress = getBalanceProgress(points);
-  return lerp(1.8, 0.58, progress);
+  const position = getBalancePosition(points, economySnapshot);
+  return getBalanceFactorFromPosition(position, ECONOMY_BALANCE.lowWealthRewardFactor, ECONOMY_BALANCE.highWealthRewardFactor);
 }
 
-function getRepairCostBalanceFactor(points, isAdmin = false) {
+function getRepairCostBalanceFactor(points, economySnapshot, isAdmin = false) {
   if (isAdmin) return 1;
-  const progress = getBalanceProgress(points);
-  return lerp(0.55, 1.55, progress);
+  const position = getBalancePosition(points, economySnapshot);
+  return getBalanceFactorFromPosition(position, ECONOMY_BALANCE.lowWealthRepairCostFactor, ECONOMY_BALANCE.highWealthRepairCostFactor);
 }
 
-function getRepairProbabilityAdjustment(points, isAdmin = false) {
+function getRepairProbabilityAdjustment(points, economySnapshot, isAdmin = false) {
   if (isAdmin) return 0;
-  const progress = getBalanceProgress(points);
-  return lerp(-0.08, 0.11, progress);
+  const position = getBalancePosition(points, economySnapshot);
+  if (position < 0) {
+    return lerp(0, ECONOMY_BALANCE.lowWealthRepairProbabilityAdjustment, Math.abs(position));
+  }
+  return lerp(0, ECONOMY_BALANCE.highWealthRepairProbabilityAdjustment, position);
 }
 
 function sampleNaturalizedFactor(targetFactor, isAdmin = false) {
@@ -200,6 +237,7 @@ export async function handleSpaceInteraction(interaction) {
 
   const stats = getUserStats(interaction.guildId, interaction.user.id);
   const isAdminUser = stats.admin === true;
+  const economySnapshot = getGuildEconomySnapshot(interaction.guildId);
   const defaultPlanetName = getDefaultPlanetName();
   const unlockedPlanets = parseUnlockedPlanets(stats.unlocked_planets, defaultPlanetName);
   const currentPlanetName = PLANETS[stats.current_planet] ? stats.current_planet : defaultPlanetName;
@@ -431,7 +469,7 @@ export async function handleSpaceInteraction(interaction) {
   if (roll < threshold) {
     // 성공 시 (보상 결정)
     const rewardRoll = Math.random();
-    const baseRewardFactor = getRewardBalanceFactor(stats.points, isAdminUser);
+    const baseRewardFactor = getRewardBalanceFactor(stats.points, economySnapshot, isAdminUser);
     const rewardFactor = sampleNaturalizedFactor(baseRewardFactor, isAdminUser);
     let basePointsAwarded = 0;
     if (rewardRoll < 0.15) { // 15% 확률로 희귀 아이템
@@ -462,10 +500,10 @@ export async function handleSpaceInteraction(interaction) {
 
     // 기본 파손 확률 40%, 방호 레벨당 4% 감소 + 자산 구간별 보정
     const baseRepairProb = Math.max(0.04, 0.4 - (stats.armor_level * 0.04));
-    const baseRepairProbAdjustment = getRepairProbabilityAdjustment(stats.points, isAdminUser);
+    const baseRepairProbAdjustment = getRepairProbabilityAdjustment(stats.points, economySnapshot, isAdminUser);
     const repairProbAdjustment = sampleNaturalizedProbabilityAdjustment(baseRepairProbAdjustment, isAdminUser);
     const repairProb = clamp(baseRepairProb + repairProbAdjustment, 0.02, 0.85);
-    const baseRepairCostFactor = getRepairCostBalanceFactor(stats.points, isAdminUser);
+    const baseRepairCostFactor = getRepairCostBalanceFactor(stats.points, economySnapshot, isAdminUser);
     const repairCostFactor = sampleNaturalizedFactor(baseRepairCostFactor, isAdminUser);
 
     if (repairRoll < repairProb) { // 계산된 확률로 수리비 발생
