@@ -9,7 +9,7 @@
       "admin": true
     },
     "624851037857120286": {
-      "points": 6145,
+      "points": 1007962,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\"]",
       "current_planet": "목성",
       "speed_level": 6,
@@ -21,10 +21,11 @@
       "unlocked_planets": "[\"지구\",\"화성\"]",
       "current_planet": "화성",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "846701362393776138": {
-      "points": 1266268,
+      "points": 1266634,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
@@ -32,14 +33,15 @@
       "admin": false
     },
     "1012873421211828304": {
-      "points": 3286108,
+      "points": 3286857,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\",\"안드로메다\"]",
       "current_planet": "안드로메다",
       "speed_level": 9,
-      "armor_level": 9
+      "armor_level": 9,
+      "admin": false
     },
     "427776391912620062": {
-      "points": 17294,
+      "points": 2017294,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 1,
@@ -51,35 +53,40 @@
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1472150886611550343": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "870515660747317288": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1138078475954167958": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "737274240901971968": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1231881415151325236": {
       "points": 10000,
@@ -93,38 +100,59 @@
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1277191737521082472": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1094391820030582825": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1493862229504954389": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "1359830886065115277": {
       "points": 10000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
-      "armor_level": 0
+      "armor_level": 0,
+      "admin": false
     },
     "913319144915603487": {
       "points": 10000,
+      "unlocked_planets": "[\"지구\"]",
+      "current_planet": "지구",
+      "speed_level": 0,
+      "armor_level": 0,
+      "admin": false
+    },
+    "1468617042935545911": {
+      "points": 1000000,
+      "unlocked_planets": "[\"지구\"]",
+      "current_planet": "지구",
+      "speed_level": 0,
+      "armor_level": 0,
+      "admin": false
+    },
+    "677169801235529743": {
+      "points": 1000000,
       "unlocked_planets": "[\"지구\"]",
       "current_planet": "지구",
       "speed_level": 0,
