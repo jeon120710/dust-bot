@@ -157,6 +157,14 @@
       "current_planet": "지구",
       "speed_level": 0,
       "armor_level": 0
+    },
+    "1295267233798291528": {
+      "points": 1000000,
+      "unlocked_planets": "[\"지구\"]",
+      "current_planet": "지구",
+      "speed_level": 0,
+      "armor_level": 0
     }
+
   }
 }
