@@ -501,9 +501,9 @@ function normalizeCallModelResult(result) {
 
 const DISCORD_MESSAGE_LIMIT = 2000;
 const DISCORD_SAFE_CHUNK = 1900;
-const CHANNEL_CONTEXT_FETCH_LIMIT = 15;
-const CHANNEL_CONTEXT_USE_LIMIT = 10;
-const CHANNEL_CONTEXT_LINE_LIMIT = 180;
+const CHANNEL_CONTEXT_FETCH_LIMIT = 30;
+const CHANNEL_CONTEXT_USE_LIMIT = 18;
+const CHANNEL_CONTEXT_LINE_LIMIT = 260;
 const CODE_CONTEXT_MAX_SNIPPETS = 6;
 const CODE_CONTEXT_MAX_LINE_LEN = 180;
 const CODE_REFERENCE_FILES = [
@@ -784,9 +784,29 @@ function buildChannelContextLine(msg) {
   return "";
 }
 
+function isTransientBotStatusMessage(msg) {
+  if (!msg?.author?.bot) return false;
+  const text = String(msg.content || "").trim();
+  if (!text) return false;
+  return (
+    text.includes("생각중") ||
+    text.includes("웹 검색 중") ||
+    text.includes("정말로 실행하시겠습니까?") ||
+    text.includes("loading:") ||
+    text.includes("load:")
+  );
+}
+
 async function getRecentChannelContextForPrompt(message, options = {}) {
   const fetchLimit = Number(options.fetchLimit || CHANNEL_CONTEXT_FETCH_LIMIT);
   const useLimit = Number(options.useLimit || CHANNEL_CONTEXT_USE_LIMIT);
+  const excludeMessageIds = new Set(
+    Array.isArray(options.excludeMessageIds)
+      ? options.excludeMessageIds.map((id) => String(id))
+      : [],
+  );
+  excludeMessageIds.add(String(message.id));
+
   const channel = message.channel?.isTextBased?.() ? message.channel : null;
   if (!channel || typeof channel.messages?.fetch !== "function") {
     return "없음";
@@ -795,8 +815,9 @@ async function getRecentChannelContextForPrompt(message, options = {}) {
   try {
     const fetched = await channel.messages.fetch({ limit: fetchLimit });
     const items = Array.from(fetched.values())
-      .filter((msg) => msg && msg.id !== message.id)
+      .filter((msg) => msg && !excludeMessageIds.has(String(msg.id)))
       .filter((msg) => !msg.system)
+      .filter((msg) => !isTransientBotStatusMessage(msg))
       .sort((a, b) => Number(a.createdTimestamp || 0) - Number(b.createdTimestamp || 0));
 
     const lines = items
@@ -1557,9 +1578,14 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  const history = getRecentConversation(message, 20);
+  const history = getRecentConversation(message, 20).filter((item, index, items) => {
+    const isLatest = index === items.length - 1;
+    return !(isLatest && item.role === "user" && String(item.content || "").trim() === input);
+  });
   const historyText = formatHistoryForPrompt(history);
-  const recentChannelContext = await getRecentChannelContextForPrompt(message);
+  const recentChannelContext = await getRecentChannelContextForPrompt(message, {
+    excludeMessageIds: [statusMessage.id],
+  });
   const codeReferencePlan = await classifyCodeReferencePlan(input);
   const recentCodeContext = getRecentCodeContextForPrompt(codeReferencePlan);
   const absolutePowerRule = isAbsolutePowerUser

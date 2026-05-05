@@ -38,7 +38,7 @@ export function appendCompletionMark(text, mark = " ✅") {
 export function formatHistoryForPrompt(history) {
   if (!Array.isArray(history) || history.length === 0) return "없음";
   return history
-    .map((item) => `${item.role === "user" ? "사용자" : "봇"}: ${item.content}`)
+    .map((item) => `${item.role === "user" ? "사용자" : "DUST"}: ${item.content}`)
     .join("\n");
 }
 
