@@ -4,6 +4,7 @@ import { LOG_FILE_PATH } from "./config.js";
 
 const resolvedLogFilePath = path.resolve(process.cwd(), LOG_FILE_PATH);
 const resolvedLogDir = path.dirname(resolvedLogFilePath);
+const resolvedErrorMarkPath = path.resolve(resolvedLogDir, "error-marks.jsonl");
 
 function ensureLogDir() {
   try {
@@ -94,6 +95,42 @@ function writeEvent(level, scope, meta = {}) {
   }
 }
 
+function formatKstTimestamp(date = new Date()) {
+  return new Intl.DateTimeFormat("ko-KR", {
+    timeZone: "Asia/Seoul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+function writeErrorMark(scope, err, meta = {}) {
+  ensureLogDir();
+
+  const payload = {
+    at: new Date().toISOString(),
+    atKst: formatKstTimestamp(),
+    scope,
+    guildId: meta.guildId || null,
+    guildName: meta.guildName || null,
+    channelId: meta.channelId || null,
+    channelName: meta.channelName || null,
+    userId: meta.userId || null,
+    message: err.message,
+    stack: err.stack,
+  };
+
+  fs.appendFile(resolvedErrorMarkPath, `${JSON.stringify(payload)}\n`, "utf8", (error) => {
+    if (error) {
+      console.error("[error] failed to append error mark file", error);
+    }
+  });
+}
+
 // 사람이 읽기 쉬운 로그 파일 작성 함수
 function writeReadableLog(level, scope, meta = {}) {
   const readableLogPath = resolvedLogFilePath.replace('.jsonl', '.log');
@@ -147,6 +184,7 @@ export function logError(scope, error, meta = {}) {
   // 콘솔에 에러 로그 출력
   logToConsole("error", scope, errorMeta);
 
+  writeErrorMark(scope, err, errorMeta);
   writeEvent("error", scope, errorMeta);
 }
 

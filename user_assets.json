@@ -9,7 +9,7 @@
       "admin": true
     },
     "624851037857120286": {
-      "points": 1007962,
+      "points": 1009354,
       "unlocked_planets": "[\"지구\",\"화성\",\"목성\"]",
       "current_planet": "목성",
       "speed_level": 6,
@@ -165,6 +165,5 @@
       "speed_level": 0,
       "armor_level": 0
     }
-
   }
 }

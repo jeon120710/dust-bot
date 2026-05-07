@@ -46,6 +46,7 @@ import { buildWebSearchSourcesEmbed } from "./sourceEmbed.js";
 import { startRoleScheduler, setLogChannelId } from "./scheduler.js";
 import { handleSpaceInteraction } from "./space.js";
 import { reloadAssets } from "./assets.js";
+import { analyzeLatestErrors, attemptErrorRepair } from "./errorDoctor.js";
 
 
 const client = new Client({
@@ -98,6 +99,7 @@ const pendingPrivilegedAction = new Map();
 const pendingTargetConfirm = new Map();
 const pendingReactionConfirm = new Map(); // statusMessageId -> {userId, actionType, requestedAt}
 const pendingBatchAction = new Map(); // pendingKey -> {actionType, durationMinutes, excludeRoleId, roleId, mode, requestedAt}
+const pendingErrorRepairConfirm = new Map(); // pendingKey -> {analysis, statusMessage, requestedAt}
 const PRIVILEGED_ACTIONS = new Set([
   "send",
   "send_dm",
@@ -300,6 +302,18 @@ function splitWhitespaceTokens(text) {
   const input = String(text || "").trim();
   if (!input) return [];
   return input.split(" ").map((part) => part.trim()).filter(Boolean);
+}
+
+function isErrorAnalysisRequest(text) {
+  const normalized = String(text || "").toLowerCase().replace(/\s+/g, "");
+  return (
+    normalized.includes("오류분석") ||
+    normalized.includes("에러분석") ||
+    normalized.includes("오류확인") ||
+    normalized.includes("에러확인") ||
+    normalized.includes("erroranalysis") ||
+    normalized.includes("errordoctor")
+  );
 }
 
 function normalizeShortcutIntent(parsed) {
@@ -1136,6 +1150,59 @@ client.on("messageCreate", async (message) => {
     }
   }
 
+  const pendingErrorRepair = pendingErrorRepairConfirm.get(pendingKey);
+  if (pendingErrorRepair && isAbsolutePowerUser && rawText) {
+    const ageMs = nowMs - pendingErrorRepair.requestedAt;
+    if (ageMs > PRIVILEGED_ACTION_TTL_MS) {
+      pendingErrorRepairConfirm.delete(pendingKey);
+      try {
+        await pendingErrorRepair.statusMessage.edit("오류 수정 확인 시간이 초과되었습니다. 실행이 취소되었습니다.");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    let decision = { decision: "other", reason: "" };
+    try {
+      decision = await classifyPrivilegedConfirmation(rawText);
+    } catch (err) {
+      logError("messageCreate.error_repair.confirmation", err, {
+        guildId: message.guild?.id || null,
+        guildName: message.guild?.name || null,
+        channelId: message.channel?.id || null,
+        userId: message.author?.id || null,
+        input: rawText,
+      });
+    }
+
+    if (decision.decision === "confirm") {
+      pendingErrorRepairConfirm.delete(pendingKey);
+      try {
+        await pendingErrorRepair.statusMessage.edit("확인했습니다. child_process로 수정 시도와 검증을 실행합니다.");
+      } catch {
+        // ignore
+      }
+      const repairResult = await attemptErrorRepair(pendingErrorRepair.analysis);
+      try {
+        await pendingErrorRepair.statusMessage.edit(repairResult.message);
+      } catch {
+        await message.reply(repairResult.message);
+      }
+      return;
+    }
+
+    if (decision.decision === "cancel") {
+      pendingErrorRepairConfirm.delete(pendingKey);
+      try {
+        await pendingErrorRepair.statusMessage.edit("오류 수정 시도를 취소했습니다.");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+  }
+
 
 
   if (await tryHandleTypingGameSubmission(message)) {
@@ -1167,6 +1234,74 @@ client.on("messageCreate", async (message) => {
   logCommandTrigger(message, commandText);
   if (!isDirectResetCommand) {
     saveConversation(message, "user", input);
+  }
+
+  if (isErrorAnalysisRequest(commandText)) {
+    if (!isAbsolutePowerUser) {
+      logActionAudit({
+        phase: "rejected",
+        action: "error-analysis",
+        requiredPermission: "absolute_power_user",
+        reason: "missing_permission",
+        guildId: message.guild?.id || null,
+        userId: message.author?.id || null,
+        commandText,
+      });
+      await updateStatusWithOptionalPermission(message, statusMessage, "오류 분석은 최상위 관리자만 실행할 수 있습니다.");
+      return;
+    }
+
+    logActionAudit({
+      phase: "requested",
+      action: "error-analysis",
+      requiredPermission: "absolute_power_user",
+      guildId: message.guild?.id || null,
+      userId: message.author?.id || null,
+      commandText,
+    });
+
+    try {
+      await statusMessage.edit("최근 오류 마킹, 로그, 코드 주변부를 확인하고 child_process 진단을 실행합니다.");
+      const analysisResult = await analyzeLatestErrors({
+        guildId: message.guild?.id || null,
+      });
+      await sendChunkedMessage(message, statusMessage, analysisResult.message);
+
+      if (analysisResult.analysis && Array.isArray(analysisResult.analysis.fileEdits) && analysisResult.analysis.fileEdits.length > 0) {
+        pendingErrorRepairConfirm.set(pendingKey, {
+          analysis: analysisResult.analysis,
+          statusMessage,
+          userId: message.author.id,
+          requestedAt: Date.now(),
+        });
+        try {
+          await statusMessage.react("✅");
+          await statusMessage.react("❌");
+        } catch (err) {
+          logError("index.error_analysis.react", err, {
+            guildId: message.guild?.id || null,
+            guildName: message.guild?.name || null,
+            channelId: message.channel?.id || null,
+            userId: message.author?.id || null,
+          });
+        }
+      }
+    } catch (err) {
+      logError("messageCreate.error_analysis", err, {
+        guildId: message.guild?.id || null,
+        guildName: message.guild?.name || null,
+        channelId: message.channel?.id || null,
+        channelName: "name" in (message.channel || {}) ? message.channel.name || null : null,
+        userId: message.author?.id || null,
+        input: commandText,
+      });
+      try {
+        await statusMessage.edit("오류 분석 중 문제가 발생했습니다. 로그를 확인해 주세요.");
+      } catch {
+        await message.reply("오류 분석 중 문제가 발생했습니다. 로그를 확인해 주세요.");
+      }
+    }
+    return;
   }
 
   // !reset-memory [@user|userId]
@@ -1305,7 +1440,14 @@ client.on("messageCreate", async (message) => {
           userId: message.author?.id || null,
           durationMinutes,
         });
-      } catch {
+      } catch (err) {
+        logError("messageCreate.batch_timeout.prepare", err, {
+          guildId: message.guild?.id || null,
+          guildName: message.guild?.name || null,
+          channelId: message.channel?.id || null,
+          userId: message.author?.id || null,
+          input: commandText,
+        });
         await statusMessage.edit("배치 작업 준비 중 오류가 발생했습니다.");
       }
     }
@@ -1377,7 +1519,14 @@ client.on("messageCreate", async (message) => {
         userId: message.author?.id || null,
         targetRoleId: resolvedRole.role.id,
       });
-    } catch {
+    } catch (err) {
+      logError("messageCreate.batch_role_add.prepare", err, {
+        guildId: message.guild?.id || null,
+        guildName: message.guild?.name || null,
+        channelId: message.channel?.id || null,
+        userId: message.author?.id || null,
+        input: commandText,
+      });
       await statusMessage.edit("배치 작업 준비 중 오류가 발생했습니다.");
     }
     return;
@@ -1448,7 +1597,14 @@ client.on("messageCreate", async (message) => {
         userId: message.author?.id || null,
         targetRoleId: resolvedRole.role.id,
       });
-    } catch {
+    } catch (err) {
+      logError("messageCreate.batch_role_remove.prepare", err, {
+        guildId: message.guild?.id || null,
+        guildName: message.guild?.name || null,
+        channelId: message.channel?.id || null,
+        userId: message.author?.id || null,
+        input: commandText,
+      });
       await statusMessage.edit("배치 작업 준비 중 오류가 발생했습니다.");
     }
     return;
@@ -1887,6 +2043,9 @@ client.on("messageCreate", async (message) => {
     } else {
       logError("messageCreate", err, {
         guildId: message.guild?.id || null,
+        guildName: message.guild?.name || null,
+        channelId: message.channel?.id || null,
+        channelName: "name" in (message.channel || {}) ? message.channel.name || null : null,
         userId: message.author?.id || null,
         input,
       });
@@ -1934,7 +2093,9 @@ async function handleSlashInteraction(interaction) {
   } catch (err) {
     logError("interactionCreate.slash", err, {
       guildId: interaction.guildId || null,
+      guildName: interaction.guild?.name || null,
       channelId: interaction.channelId || null,
+      channelName: "name" in (interaction.channel || {}) ? interaction.channel.name || null : null,
       userId: interaction.user?.id || null,
       commandName: interaction.commandName,
     });
@@ -1980,9 +2141,12 @@ client.on("messageReactionAdd", async (reaction, user) => {
   const messageId = reaction.message.id;
   const pendingData = pendingReactionConfirm.get(messageId);
   const pendingBatch = pendingBatchAction.get(messageId);
+  const pendingRepairEntry = Array.from(pendingErrorRepairConfirm.entries())
+    .find(([, value]) => value.statusMessage?.id === messageId);
+  const pendingRepair = pendingRepairEntry?.[1] || null;
   
   // 처리할 대기 작업이 없으면 무시
-  if (!pendingData && !pendingBatch) return;
+  if (!pendingData && !pendingBatch && !pendingRepair) return;
 
   console.log(`[DEBUG] 반응 감지: emoji=${reaction.emoji.toString()}, user=${user.id}`);
 
@@ -2151,6 +2315,48 @@ client.on("messageReactionAdd", async (reaction, user) => {
     }
 
     console.log(`[DEBUG] 배치 액션 - 인식되지 않은 이모지: ${emojiStr}`);
+  }
+
+  if (pendingRepair) {
+    if (user.id !== pendingRepair.userId) {
+      return;
+    }
+
+    const ageMs = nowMs - pendingRepair.requestedAt;
+    if (ageMs > PRIVILEGED_ACTION_TTL_MS) {
+      pendingErrorRepairConfirm.delete(pendingRepairEntry[0]);
+      try {
+        await reaction.message.edit("오류 수정 확인 시간이 초과되었습니다. 실행이 취소되었습니다.");
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    if (emojiStr === "✅") {
+      pendingErrorRepairConfirm.delete(pendingRepairEntry[0]);
+      try {
+        await pendingRepair.statusMessage.edit("확인했습니다. child_process로 수정 시도와 검증을 실행합니다.");
+      } catch {
+        // ignore
+      }
+      const repairResult = await attemptErrorRepair(pendingRepair.analysis);
+      try {
+        await pendingRepair.statusMessage.edit(repairResult.message);
+      } catch {
+        // ignore
+      }
+      return;
+    }
+
+    if (emojiStr === "❌") {
+      pendingErrorRepairConfirm.delete(pendingRepairEntry[0]);
+      try {
+        await pendingRepair.statusMessage.edit("오류 수정 시도를 취소했습니다.");
+      } catch {
+        // ignore
+      }
+    }
   }
 });
 
