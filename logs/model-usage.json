@@ -1,4 +1,8 @@
 {
-  "date": "2026-05-11",
-  "counts": {}
+  "date": "2026-05-12",
+  "counts": {
+    "gemini-flash-latest": 1,
+    "gemini-2.5-flash": 1,
+    "gemini-3.1-flash-lite": 1
+  }
 }

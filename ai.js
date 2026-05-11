@@ -1,10 +1,15 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import { GoogleGenAI } from "@google/genai";
-import { GOOGLE_API_KEY, MODEL_CANDIDATES, FORCE_MODEL_NAME } from "./config.js";
+import { OpenAI } from "openai";
+import { GOOGLE_API_KEY, HF_TOKEN, MODEL_CANDIDATES, FORCE_MODEL_NAME } from "./config.js";
 import { logAiCall, logError } from "./logger.js";
 
 const ai = GOOGLE_API_KEY ? new GoogleGenAI({ apiKey: GOOGLE_API_KEY }) : null;
+const hfClient = HF_TOKEN ? new OpenAI({
+	baseURL: "https://router.huggingface.co/v1",
+	apiKey: HF_TOKEN,
+}) : null;
 const modelCooldownUntil = new Map();
 const searchUnsupportedModels = new Set();
 const WEB_SEARCH_MODELS = new Set([
@@ -43,7 +48,11 @@ function isClaudeModelName(modelName) {
 }
 
 function isGoogleModelName(modelName) {
-  return !isClaudeModelName(modelName);
+  return !isClaudeModelName(modelName) && !isHuggingFaceModelName(modelName);
+}
+
+function isHuggingFaceModelName(modelName) {
+  return String(modelName || "").includes(":");
 }
 
 function buildHttpError(status, message, extra = {}) {
@@ -404,7 +413,31 @@ async function generateWithGoogle(modelName, prompt, options = {}) {
   }
 }
 
+async function generateWithHuggingFace(modelName, prompt, options = {}) {
+  if (!hfClient) {
+    throw buildHttpError(401, "hf_token_missing");
+  }
+
+  const messages = prompt.map(p => ({
+    role: p.role,
+    content: p.parts ? p.parts.map(part => part.text).join('') : p.text,
+  }));
+
+  const chatCompletion = await hfClient.chat.completions.create({
+    model: modelName,
+    messages: messages,
+  });
+
+  return {
+    text: chatCompletion.choices[0].message.content,
+    sources: [],
+  };
+}
+
 async function generateJsonFirst(modelName, prompt, options = {}) {
+  if (isHuggingFaceModelName(modelName)) {
+    return generateWithHuggingFace(modelName, prompt, options);
+  }
   return generateWithGoogle(modelName, prompt, options);
 }
 
@@ -639,4 +672,36 @@ export async function callModel(prompt, options = {}) {
     message: "현재 모든 AI 모델이 일시적으로 사용 불가하거나 호출 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
   });
   return returnMeta ? { text, sources: [] } : text;
+}
+
+export async function imageToText(imageUrl) {
+  if (!HF_TOKEN) {
+    throw new Error("HF_TOKEN이 설정되지 않았습니다.");
+  }
+
+  // Fetch the image data
+  const imageResponse = await fetch(imageUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Failed to fetch image: ${imageResponse.status}`);
+  }
+  const imageBuffer = await imageResponse.arrayBuffer();
+
+  const response = await fetch(
+    "https://router.huggingface.co/zai-org/api/paas/v4/layout_parsing",
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.HF_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+      body: JSON.stringify({ inputs: Array.from(new Uint8Array(imageBuffer)) }),
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Hugging Face API error: ${response.status} ${response.statusText}`);
+  }
+
+  const result = await response.json();
+  return result;
 }

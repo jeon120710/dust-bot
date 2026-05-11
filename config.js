@@ -11,8 +11,10 @@ const GOOGLE_MODEL_CANDIDATES = [
   "gemma-3-12b-it",
 ];
 export const GOOGLE_API_KEY = process.env.GOOGLE_API_KEY || process.env.GEMMA_API_KEY;
+export const HF_TOKEN = process.env.HF_TOKEN;
 export const MODEL_CANDIDATES = [
   ...(GOOGLE_API_KEY ? GOOGLE_MODEL_CANDIDATES : []),
+  ...(HF_TOKEN ? ["deepseek-ai/DeepSeek-V4-Flash:novita"] : []),
 ];
 export const FORCE_MODEL_NAME = String(process.env.FORCE_MODEL_NAME || "").trim();
 export const DISCORD_TOKEN = process.env.DISCORD_TOKEN;

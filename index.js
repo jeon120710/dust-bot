@@ -22,7 +22,7 @@ import {
   safeParseJsonObject,
   appendCompletionMark,
 } from "./utils.js";
-import { callModel, getCurrentModelName } from "./ai.js";
+import { callModel, getCurrentModelName, imageToText } from "./ai.js";
 import {
   tryHandleMentionRequest,
   tryHandleMemberLookupQuestion,
@@ -1229,9 +1229,35 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // Process attached images
+  let imageText = "";
+  if (message.attachments.size > 0) {
+    const imageAttachments = message.attachments.filter(att => att.contentType?.startsWith('image/'));
+    if (imageAttachments.size > 0) {
+      try {
+        await statusMessage.edit("-# <a:load:1495336917326368829> 이미지 분석 중...");
+        for (const [id, attachment] of imageAttachments) {
+          const extractedText = await imageToText(attachment.url);
+          if (extractedText && typeof extractedText === 'string') {
+            imageText += `\n[이미지에서 추출된 텍스트: ${extractedText}]`;
+          } else if (extractedText && typeof extractedText === 'object') {
+            // Assuming the API returns an object with text content
+            const textContent = JSON.stringify(extractedText);
+            imageText += `\n[이미지 분석 결과: ${textContent}]`;
+          }
+        }
+      } catch (err) {
+        console.error("Image processing error:", err);
+        imageText += "\n[이미지 분석 실패]";
+      }
+    }
+  }
+
+  const fullInput = input + imageText;
+
   logCommandTrigger(message, commandText);
   if (!isDirectResetCommand) {
-    saveConversation(message, "user", input);
+    saveConversation(message, "user", fullInput);
   }
 
   if (isErrorAnalysisRequest(commandText)) {
@@ -1366,8 +1392,8 @@ client.on("messageCreate", async (message) => {
   }
 
   // 배치 명령어 처리 (확인 시스템 포함)
-  const batchCommandParts = splitWhitespaceTokens(input);
-  const batchFullLower = input.toLowerCase();
+  const batchCommandParts = splitWhitespaceTokens(fullInput);
+  const batchFullLower = fullInput.toLowerCase();
 
   // 타임아웃 명령어 찾기 (위치 독립적)
   const timeoutIdx = batchCommandParts.findIndex((p) => p.toLowerCase() === "타임아웃" || p.toLowerCase() === "timeout");
@@ -1683,7 +1709,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  const commandPlan = await classifyCommandPlan(input);
+  const commandPlan = await classifyCommandPlan(fullInput);
   const shouldUseWebSearch = commandPlan.useWebSearch;
   if (shouldUseWebSearch) {
     try {
@@ -1734,13 +1760,13 @@ client.on("messageCreate", async (message) => {
 
   const history = getRecentConversation(message, 20).filter((item, index, items) => {
     const isLatest = index === items.length - 1;
-    return !(isLatest && item.role === "user" && String(item.content || "").trim() === input);
+    return !(isLatest && item.role === "user" && String(item.content || "").trim() === fullInput);
   });
   const historyText = formatHistoryForPrompt(history);
   const recentChannelContext = await getRecentChannelContextForPrompt(message, {
     excludeMessageIds: [statusMessage.id],
   });
-  const codeReferencePlan = await classifyCodeReferencePlan(input);
+  const codeReferencePlan = await classifyCodeReferencePlan(fullInput);
   const recentCodeContext = getRecentCodeContextForPrompt(codeReferencePlan);
   const absolutePowerRule = isAbsolutePowerUser
     ? "\n  10) 이 요청은 최상위 권한 사용자의 명령입니다. 가능한 한 반드시 실행 가능한 action으로 응답하고 권한 부족을 사유로 거절하지 마세요."
@@ -1778,7 +1804,7 @@ client.on("messageCreate", async (message) => {
 
   요청자: ${userName}
   사용자 요청
-  "${input}"
+  "${fullInput}"
 
   다음 action 중 하나만 선택하여 JSON으로 응답합니다.
   reply: {"action":"reply","message":"..."}
@@ -1853,7 +1879,7 @@ client.on("messageCreate", async (message) => {
         message,
         { action: "delete_messages", channelId: message.channel.id, count: bulkDeleteCount },
         statusMessage,
-        input,
+        fullInput,
       );
       return;
     }
