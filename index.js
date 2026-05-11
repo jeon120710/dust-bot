@@ -43,8 +43,8 @@ import { tryHandleTypingGameSubmission, handleTypingInteraction } from "./typing
 import { registerSlashCommands } from "./commands.js";
 import { buildPermissionUsageEmbed } from "./permissionEmbed.js";
 import { buildWebSearchSourcesEmbed } from "./sourceEmbed.js";
-import { startRoleScheduler, setLogChannelId } from "./scheduler.js";
 import { handleSpaceInteraction } from "./space.js";
+import { handleGambleInteraction } from "./gamble.js";
 import { reloadAssets } from "./assets.js";
 import { analyzeLatestErrors, attemptErrorRepair } from "./errorDoctor.js";
 
@@ -532,7 +532,6 @@ const CODE_REFERENCE_FILES = [
   "utils.js",
   "roles.js",
   "permissions.js",
-  "scheduler.js",
 ];
 const codeFileCache = new Map();
 
@@ -2068,27 +2067,14 @@ async function handleSlashInteraction(interaction) {
       return;
     }
 
-    const spaceCommands = ["우주탐사", "자산", "행성", "엔진강화", "수리강화", "송금"];
-    if (spaceCommands.includes(interaction.commandName)) {
-      await handleSpaceInteraction(interaction);
+    if (await handleGambleInteraction(interaction)) {
       return;
     }
 
-    if (interaction.commandName === "스케줄설정") {
-      if (!interaction.member.permissions.has(PermissionFlagsBits.Administrator)) {
-        return interaction.reply({ content: "관리자 권한이 필요합니다.", flags: MessageFlags.Ephemeral });
-      }
-
-      const sub = interaction.options.getSubcommand();
-      if (sub === "로그채널") {
-        const channel = interaction.options.getChannel("채널");
-        if (!channel.isTextBased()) {
-          return interaction.reply({ content: "텍스트 채널만 설정할 수 있습니다.", flags: MessageFlags.Ephemeral });
-        }
-
-        setLogChannelId(channel.id);
-        await interaction.reply({ content: `스케줄러 결과 보고 채널이 <#${channel.id}>로 설정되었습니다.`, flags: MessageFlags.Ephemeral });
-      }
+    const spaceCommands = ["자산", "송금"];
+    if (spaceCommands.includes(interaction.commandName)) {
+      await handleSpaceInteraction(interaction);
+      return;
     }
   } catch (err) {
     logError("interactionCreate.slash", err, {
@@ -2381,8 +2367,6 @@ client.once(Events.ClientReady, async () => {
     `${client.user.tag} 봇이 온라인 상태입니다. 샤드: ${shardId}, 접두사: ${PREFIX}, 현재 모델: ${getCurrentModelName()}`,
   );
 
-  // 스케줄러 시작 (16시/22시 역할 지급, 18시/00시 역할 회수)
-  startRoleScheduler(client);
 });
 
 client.login(DISCORD_TOKEN);

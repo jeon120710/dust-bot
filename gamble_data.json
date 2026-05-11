@@ -1,0 +1,29 @@
+{
+  "1464563536561967233": {
+    "1269575955626725390": {
+      "gambling": {
+        "plays": 1,
+        "wins": 0,
+        "losses": 1,
+        "staked": 1000,
+        "profit": -1000,
+        "bestWin": 0
+      },
+      "lottery": {
+        "tickets": 3,
+        "wins": 0,
+        "jackpots": 0,
+        "spent": 3000,
+        "prize": 0,
+        "profit": -3000,
+        "bestPrize": 0
+      },
+      "daily": {
+        "lastClaimDate": "2026-05-11",
+        "claims": 1,
+        "totalClaimed": 10000
+      },
+      "updatedAt": "2026-05-11T12:31:38.508Z"
+    }
+  }
+}

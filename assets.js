@@ -42,7 +42,7 @@ export function getUserStats(guildId, userId) {
   if (!assets[guildId][userId]) {
     assets[guildId][userId] = {
       points: 0,
-      unlocked_planets: '["지구"]', // 기존 DB 호환을 위해 문자열 유지
+      unlocked_planets: '["지구"]',
       current_planet: "지구",
       speed_level: 0,
       armor_level: 0,
@@ -110,12 +110,12 @@ export function updateUserStats(guildId, userId, unlockedPlanets, currentPlanet)
 
 export function upgradeUserSpeed(guildId, userId) {
   const stats = getUserStats(guildId, userId);
-  stats.speed_level += 1;
+  stats.speed_level = Number(stats.speed_level || 0) + 1;
   saveAssets();
 }
 
 export function upgradeUserArmor(guildId, userId) {
   const stats = getUserStats(guildId, userId);
-  stats.armor_level += 1;
+  stats.armor_level = Number(stats.armor_level || 0) + 1;
   saveAssets();
 }

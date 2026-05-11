@@ -1,20 +1,8 @@
 import { logError } from "./logger.js";
-import { SlashCommandBuilder } from "discord.js";
 
 async function registerSlashCommands(client, options = {}) {
   const shardId = client.shard?.ids?.[0] ?? 0;
   const { profile = "primary" } = options;
-
-  const SCHEDULER_COMMANDS = [
-    new SlashCommandBuilder()
-      .setName("스케줄설정")
-      .setDescription("역할 스케줄러 설정을 관리합니다.")
-      .addSubcommand(sub =>
-        sub.setName("로그채널")
-          .setDescription("결과 보고를 받을 관리자 채널을 설정합니다.")
-          .addChannelOption(opt => opt.setName("채널").setDescription("알림을 받을 채널").setRequired(true))
-      )
-  ].map(cmd => cmd.toJSON());
 
   try {
     // 1. 기존 명령어 완전 초기화
@@ -31,7 +19,8 @@ async function registerSlashCommands(client, options = {}) {
     if (profile === "primary") {
       const { TYPING_COMMANDS } = await import("./typing.js");
       const { SPACE_COMMANDS } = await import("./space.js");
-      commandDataList = [...TYPING_COMMANDS, ...SCHEDULER_COMMANDS, ...SPACE_COMMANDS];
+      const { GAMBLE_COMMANDS } = await import("./gamble.js");
+      commandDataList = [...TYPING_COMMANDS, ...SPACE_COMMANDS, ...GAMBLE_COMMANDS];
     }
 
     // 2. 현재 정의된 명령어로 새로 등록
