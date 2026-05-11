@@ -43,7 +43,6 @@ import { tryHandleTypingGameSubmission, handleTypingInteraction } from "./typing
 import { registerSlashCommands } from "./commands.js";
 import { buildPermissionUsageEmbed } from "./permissionEmbed.js";
 import { buildWebSearchSourcesEmbed } from "./sourceEmbed.js";
-import { handleSpaceInteraction } from "./space.js";
 import { handleGambleInteraction } from "./gamble.js";
 import { reloadAssets } from "./assets.js";
 import { analyzeLatestErrors, attemptErrorRepair } from "./errorDoctor.js";
@@ -528,7 +527,7 @@ const CODE_REFERENCE_FILES = [
   "commands.js",
   "database.js",
   "typing.js",
-  "space.js",
+  "gamble.js",
   "utils.js",
   "roles.js",
   "permissions.js",
@@ -2071,11 +2070,6 @@ async function handleSlashInteraction(interaction) {
       return;
     }
 
-    const spaceCommands = ["자산", "송금"];
-    if (spaceCommands.includes(interaction.commandName)) {
-      await handleSpaceInteraction(interaction);
-      return;
-    }
   } catch (err) {
     logError("interactionCreate.slash", err, {
       guildId: interaction.guildId || null,

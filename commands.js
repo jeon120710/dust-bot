@@ -18,9 +18,8 @@ async function registerSlashCommands(client, options = {}) {
     let commandDataList = [];
     if (profile === "primary") {
       const { TYPING_COMMANDS } = await import("./typing.js");
-      const { SPACE_COMMANDS } = await import("./space.js");
       const { GAMBLE_COMMANDS } = await import("./gamble.js");
-      commandDataList = [...TYPING_COMMANDS, ...SPACE_COMMANDS, ...GAMBLE_COMMANDS];
+      commandDataList = [...TYPING_COMMANDS, ...GAMBLE_COMMANDS];
     }
 
     // 2. 현재 정의된 명령어로 새로 등록

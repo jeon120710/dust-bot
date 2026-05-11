@@ -22,7 +22,7 @@ const CODE_FILES = [
   "database.js",
   "logger.js",
   "scheduler.js",
-  "space.js",
+  "gamble.js",
   "typing.js",
   "utils.js",
 ];
