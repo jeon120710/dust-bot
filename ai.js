@@ -418,18 +418,31 @@ async function generateWithHuggingFace(modelName, prompt, options = {}) {
     throw buildHttpError(401, "hf_token_missing");
   }
 
-  const messages = prompt.map(p => ({
-    role: p.role,
-    content: p.parts ? p.parts.map(part => part.text).join('') : p.text,
-  }));
+  const textPrompt = prompt
+    .map((p) => `${p.role}: ${p.parts ? p.parts.map((part) => part.text).join("") : p.text}`)
+    .join("\n\n");
 
-  const chatCompletion = await hfClient.chat.completions.create({
+  const response = await hfClient.responses.create({
     model: modelName,
-    messages: messages,
+    input: textPrompt,
   });
 
+  const textOutput =
+    String(response.output_text || "") ||
+    (Array.isArray(response.output)
+      ? response.output
+          .map((outputItem) => {
+            if (typeof outputItem === "string") return outputItem;
+            if (Array.isArray(outputItem?.content)) {
+              return outputItem.content.map((c) => String(c?.text || "")).join("");
+            }
+            return "";
+          })
+          .join(" ")
+      : "");
+
   return {
-    text: chatCompletion.choices[0].message.content,
+    text: textOutput,
     sources: [],
   };
 }
@@ -629,7 +642,7 @@ export async function callModel(prompt, options = {}) {
     }
 
     if (outcome.kind === "fatal") {
-      console.warn(`Model failed (${modelName}). failover=true fatal status=${outcome.err?.status || ""}`);
+      console.warn(`Model failed (${modelName}). failover=true fatal status=${outcome.err?.status || ""} message=${String(outcome.err?.message || "")}`);
       continue;
     }
   }
@@ -643,65 +656,67 @@ export async function callModel(prompt, options = {}) {
     return returnMeta ? { text, sources: [] } : text;
   }
 
-  if (useWebSearch && eligibleModels.length > 0 && eligibleModels.every((name) => searchUnsupportedModels.has(name))) {
-    const text = JSON.stringify({
-      action: "reply",
-      message: "웹 검색을 지원하는 모델이 없어 응답할 수 없습니다. 관리자에게 모델 설정을 확인해 달라고 요청해 주세요.",
-    });
-    return returnMeta ? { text, sources: [] } : text;
-  }
-
-  const quotaCheckModels = useWebSearch
-    ? orderedModels.filter((name) => WEB_SEARCH_MODELS.has(name) && !searchUnsupportedModels.has(name))
-    : orderedModels;
-  const allQuotaExhausted = quotaCheckModels.length > 0 && quotaCheckModels.every((m) => !hasRemainingQuota(m));
-  if (allQuotaExhausted) {
-    const text = JSON.stringify({
-      action: "reply",
-      message: useWebSearch
-        ? "오늘 사용 가능한 웹 검색 모델 호출 한도를 모두 소진했습니다. 내일 다시 시도해 주세요."
-        : "오늘 사용 가능한 모델 호출 한도를 모두 소진했습니다. 내일 다시 시도해 주세요.",
-    });
-    return returnMeta ? { text, sources: [] } : text;
-  }
-
-  console.error("AI call failed: all models unavailable or daily quota exhausted.");
-  logAiCall("all_models", prompt, null, false);
   const text = JSON.stringify({
     action: "reply",
-    message: "현재 모든 AI 모델이 일시적으로 사용 불가하거나 호출 한도에 도달했습니다. 잠시 후 다시 시도해 주세요.",
+    message: useWebSearch
+      ? "오늘 사용 가능한 웹 검색 모델 호출 한도를 모두 소진했습니다. 내일 다시 시도해 주세요."
+      : "오늘 사용 가능한 모델 호출 한도를 모두 소진했습니다. 내일 다시 시도해 주세요.",
   });
   return returnMeta ? { text, sources: [] } : text;
 }
+
+export async function callSpecificModel(modelName, prompt, options = {}) {
+  const { useWebSearch = false, returnMeta = false, channel } = options;
+  if (!modelName || !String(modelName).trim()) {
+    throw new Error("model_name_required");
+  }
+  if (channel) {
+    channel.sendTyping().catch(() => {});
+  }
+  ensureUsageStateLoaded();
+  await prepareModels();
+
+  const normalizedModelName = String(modelName || "").trim();
+  const outcome = await tryGenerateWithRetries(normalizedModelName, prompt, { useWebSearch });
+  if (outcome.ok) {
+    logAiCall(normalizedModelName, prompt, outcome.text?.text || "", true);
+    return returnMeta ? outcome.text : outcome.text?.text || "";
+  }
+
+  logAiCall(normalizedModelName, prompt, null, false, outcome.err);
+  const err = outcome.err || new Error("model_call_failed");
+  throw err;
+}
+
+const HF_IMAGE_MODEL = "zai-org/GLM-OCR";
 
 export async function imageToText(imageUrl) {
   if (!HF_TOKEN) {
     throw new Error("HF_TOKEN이 설정되지 않았습니다.");
   }
 
-  // Fetch the image data
   const imageResponse = await fetch(imageUrl);
   if (!imageResponse.ok) {
     throw new Error(`Failed to fetch image: ${imageResponse.status}`);
   }
-  const imageBuffer = await imageResponse.arrayBuffer();
+  const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
 
   const response = await fetch(
-    "https://router.huggingface.co/zai-org/api/paas/v4/layout_parsing",
+    `https://api-inference.huggingface.co/models/${HF_IMAGE_MODEL}`,
     {
-      headers: {
-        Authorization: `Bearer ${process.env.HF_TOKEN}`,
-        "Content-Type": "application/json",
-      },
       method: "POST",
-      body: JSON.stringify({ inputs: Array.from(new Uint8Array(imageBuffer)) }),
+      headers: {
+        Authorization: `Bearer ${HF_TOKEN}`,
+        "Content-Type": "application/octet-stream",
+      },
+      body: imageBuffer,
     }
   );
 
   if (!response.ok) {
-    throw new Error(`Hugging Face API error: ${response.status} ${response.statusText}`);
+    const errorText = await response.text();
+    throw new Error(`Hugging Face API error: ${response.status} ${response.statusText} - ${errorText}`);
   }
 
-  const result = await response.json();
-  return result;
+  return response.json();
 }

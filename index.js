@@ -22,7 +22,7 @@ import {
   safeParseJsonObject,
   appendCompletionMark,
 } from "./utils.js";
-import { callModel, getCurrentModelName, imageToText } from "./ai.js";
+import { callModel, callSpecificModel, getCurrentModelName, imageToText } from "./ai.js";
 import {
   tryHandleMentionRequest,
   tryHandleMemberLookupQuestion,
@@ -244,45 +244,148 @@ async function classifyPowerControlIntent(text) {
   return { intent: "none", reason: "invalid_ai_response" };
 }
 
-async function classifyDirectCommandIntent(text) {
-  const prompt = `
-당신은 디스코드 봇의 직접 명령 분류기입니다.
-아래 메시지가 reset-memory 직접 명령인지 판단하세요.
-
-규칙:
-- reset_memory: 메시지가 메모리 초기화 명령을 직접 실행하려는 경우
-- none: 그 외 모든 경우
-- 애매하면 none
-- 출력은 JSON 1개만
-
-출력 형식:
-{"intent":"reset_memory|none","argsText":"명령어 뒤 인자 문자열","reason":"짧은 판단 근거"}
-
-argsText 규칙:
-- intent가 reset_memory일 때만 사용
-- 명령어 토큰(!reset-memory 등)을 제거한 나머지 문자열
-- 인자가 없으면 빈 문자열
-
-메시지:
-"${String(text || "").replace(/"/g, '\\"')}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    const intent = String(parsed?.intent || "").toLowerCase();
-    if (intent === "reset_memory" || intent === "none") {
-      return {
-        intent,
-        argsText: intent === "reset_memory" ? String(parsed?.argsText || "").trim() : "",
-        reason: typeof parsed?.reason === "string" ? parsed.reason : "",
-      };
-    }
-  } catch {
-    // swallow and fall through
+function parseDirectResetCommand(text) {
+  const normalized = String(text || "").trim();
+  const match = normalized.match(/^!reset-memory\b(.*)$/i);
+  if (!match) {
+    return { intent: "none", argsText: "", reason: "not_reset_memory" };
   }
 
-  return { intent: "none", argsText: "", reason: "invalid_ai_response" };
+  return {
+    intent: "reset_memory",
+    argsText: String(match[1] || "").trim(),
+    reason: "parsed_direct_command",
+  };
+}
+
+function parseAdminModelRequest(text) {
+  const normalized = String(text || "").trim();
+  const modelTrigger = /(?:모델\s*호출해봐|호출해봐\s*모델|모델\s*호출)/i;
+  if (!modelTrigger.test(normalized)) return null;
+
+  const matchWithPrefix = normalized.match(/^(.+?)\s+모델\s*호출해봐\s*(.*)$/i);
+  if (matchWithPrefix) {
+    const modelName = String(matchWithPrefix[1] || "").trim();
+    const prompt = String(matchWithPrefix[2] || "").trim();
+    if (!modelName) return null;
+    return { modelName, prompt };
+  }
+
+  const matchWithSuffix = normalized.match(/^모델\s*호출해봐\s+(.+)$/i);
+  if (matchWithSuffix) {
+    const rest = String(matchWithSuffix[1] || "").trim();
+    const tokens = rest.split(/\s+/);
+    const candidate = String(tokens[0] || "").trim();
+    if (candidate.includes("/") || candidate.includes(":")) {
+      return {
+        modelName: candidate,
+        prompt: tokens.slice(1).join(" ").trim(),
+      };
+    }
+    return null;
+  }
+
+  const genericModelMatch = normalized.match(/([a-z0-9_.\-/:]+:[a-z0-9_.\-]+|[a-z0-9_.\-]+\/[a-z0-9_.\-:]+)/i);
+  if (genericModelMatch) {
+    return {
+      modelName: String(genericModelMatch[0] || "").trim(),
+      prompt: normalized.replace(genericModelMatch[0], "").replace(modelTrigger, "").trim(),
+    };
+  }
+
+  return null;
+}
+
+function parseAdminCodeRequest(text) {
+  const normalized = String(text || "").trim();
+  const codeTrigger = /(내부\s*코드|내부코드|소스\s*코드|소스코드|코드\s*보여줘|코드\s*달라|코드\s*줘)/i;
+  if (!codeTrigger.test(normalized)) return null;
+
+  const fileMatch = normalized.match(/\b(index\.js|ai\.js|actions\.js|handlers\.js|utils\.js|config\.js|errorDoctor\.js|assets\.js|permissionEmbed\.js|permissions\.js|database\.js|logger\.js)\b/i);
+  const methodMatch = normalized.match(/\b(?:function|함수|메소드)\s+([A-Za-z0-9_]+)\b/i);
+
+  return {
+    fileName: fileMatch ? String(fileMatch[1]).toLowerCase() : "index.js",
+    functionName: methodMatch ? String(methodMatch[1]) : null,
+  };
+}
+
+function extractFunctionSnippet(source, functionName) {
+  const lines = String(source || "").split("\n");
+  const signatureRegex = new RegExp(
+    `^(?:export\s+)?(?:async\s+)?(?:function\s+${functionName}|(?:const|let|var)\s+${functionName}\s*=|${functionName}\s*=\s*\(?)(?:.*)$`,
+    "i",
+  );
+
+  const startIndex = lines.findIndex((line) => signatureRegex.test(line.trim()));
+  if (startIndex === -1) return null;
+
+  const snippetLines = [];
+  let braceCount = 0;
+  let foundBlock = false;
+
+  for (let i = startIndex; i < lines.length; i += 1) {
+    const line = lines[i];
+    snippetLines.push(line);
+    const openMatches = line.match(/{/g) || [];
+    const closeMatches = line.match(/}/g) || [];
+    braceCount += openMatches.length;
+    braceCount -= closeMatches.length;
+    if (openMatches.length > 0) {
+      foundBlock = true;
+    }
+    if (foundBlock && braceCount <= 0) {
+      break;
+    }
+    if (snippetLines.join("\n").length > 1700) {
+      break;
+    }
+  }
+
+  return snippetLines.join("\n");
+}
+
+function getAdminCodeSnippet(request) {
+  const allowedFiles = new Set([
+    "index.js",
+    "ai.js",
+    "actions.js",
+    "handlers.js",
+    "utils.js",
+    "config.js",
+    "errorDoctor.js",
+    "assets.js",
+    "permissionEmbed.js",
+    "permissions.js",
+    "database.js",
+    "logger.js",
+  ]);
+
+  const fileName = String(request?.fileName || "index.js").toLowerCase();
+  if (!allowedFiles.has(fileName)) {
+    return { error: `허용되지 않은 파일입니다: ${fileName}` };
+  }
+
+  const filePath = path.resolve(process.cwd(), fileName);
+  if (!fs.existsSync(filePath)) {
+    return { error: `파일을 찾을 수 없습니다: ${fileName}` };
+  }
+
+  const source = fs.readFileSync(filePath, "utf8");
+  if (request?.functionName) {
+    const snippet = extractFunctionSnippet(source, request.functionName);
+    if (snippet) {
+      return { text: "```js\n" + snippet.trim() + "\n```" };
+    }
+    return {
+      error: `함수를 찾을 수 없습니다: ${request.functionName}. 파일 앞부분을 대신 보여줍니다.`,
+      text: "```js\n" + source.split("\n").slice(0, 80).join("\n").trim() + "\n```",
+    };
+  }
+
+  return {
+    text: "```js\n" + source.split("\n").slice(0, 80).join("\n").trim() + "\n```",
+  };
 }
 
 function clampBulkDeleteCount(value) {
@@ -857,18 +960,50 @@ client.on("messageCreate", async (message) => {
   const directCommandCandidate = !isPrefixedCommand && rawText.startsWith("!");
   let directCommandIntent = { intent: "none", argsText: "", reason: "" };
   if (directCommandCandidate) {
-    try {
-      directCommandIntent = await classifyDirectCommandIntent(rawText);
-    } catch (err) {
-      logError("messageCreate.direct_command.intent", err, {
-        guildId: message.guild?.id || null,
-        userId: message.author?.id || null,
-        input: rawText,
-      });
-    }
+    directCommandIntent = parseDirectResetCommand(rawText);
   }
   const isDirectResetCommand = directCommandIntent.intent === "reset_memory";
   const isCommandMessage = isPrefixedCommand || isDirectResetCommand;
+  let adminModelRequest = null;
+  let adminCodeRequest = null;
+  if (isAbsolutePowerUser && rawText && !isCommandMessage) {
+    adminModelRequest = parseAdminModelRequest(rawText);
+    adminCodeRequest = parseAdminCodeRequest(rawText);
+  }
+
+  if (adminCodeRequest) {
+    const snippet = getAdminCodeSnippet(adminCodeRequest);
+    if (snippet.error && snippet.text) {
+      await message.reply(`${snippet.error}\n${snippet.text}`);
+    } else if (snippet.error) {
+      await message.reply(snippet.error);
+    } else {
+      await message.reply(snippet.text);
+    }
+    return;
+  }
+
+  if (adminModelRequest) {
+    const statusMessage = await message.reply("-# <a:load:1495336917326368829> 관리자 모델 호출 중...");
+    if (message.channel?.isTextBased?.()) {
+      try {
+        await message.channel.sendTyping();
+      } catch {
+        // ignore typing errors
+      }
+    }
+
+    const prompt = adminModelRequest.prompt || "이 모델을 테스트하기 위한 간단한 한국어 응답을 생성해 주세요.";
+    try {
+      const result = await callSpecificModel(adminModelRequest.modelName, prompt, { channel: message.channel });
+      const responseText = typeof result === "string" ? result : result.text || JSON.stringify(result);
+      await statusMessage.edit(`모델 ${adminModelRequest.modelName} 호출 결과:\n${responseText}`);
+    } catch (err) {
+      await statusMessage.edit(`모델 호출에 실패했습니다: ${String(err?.message || err)}`);
+    }
+    return;
+  }
+
   const nowMs = Date.now();
   const pendingKey = buildPendingKey(message);
   const hasPendingPowerAction = pendingRestartConfirm.has(pendingKey) || pendingShutdownConfirm.has(pendingKey);
