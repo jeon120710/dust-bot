@@ -31,3 +31,28 @@
 [2026. 5. 12. PM 5:41:46] INFO ai.call
 [2026. 5. 12. PM 5:41:48] INFO ai.call
 [2026. 5. 12. PM 5:41:58] INFO ai.call
+[2026. 5. 12. PM 9:54:30] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 내가 코드 고쳤는데 사진 판독 돼?
+[2026. 5. 12. PM 9:54:35] INFO ai.call
+[2026. 5. 12. PM 9:54:40] INFO ai.call
+[2026. 5. 12. PM 9:57:12] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 내가 코드 고쳤는데 사진 판독 돼?
+[2026. 5. 12. PM 9:57:17] INFO ai.call
+[2026. 5. 12. PM 9:57:20] INFO ai.call
+[2026. 5. 12. PM 9:58:01] INFO ai.call
+[2026. 5. 12. PM 10:02:19] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 이거 뭐인것같아?
+[2026. 5. 12. PM 10:02:31] INFO ai.call
+[2026. 5. 12. PM 10:02:32] INFO ai.call
+[2026. 5. 12. PM 10:02:35] INFO ai.call
+[2026. 5. 12. PM 10:02:36] INFO ai.call
+[2026. 5. 12. PM 10:03:18] INFO ai.call
+[2026. 5. 12. PM 10:06:00] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 혹시 내가 어떤 검을 들고있는지만 보여?
+[2026. 5. 12. PM 10:06:06] INFO ai.call
+[2026. 5. 12. PM 10:06:07] INFO ai.call
+[2026. 5. 12. PM 10:06:09] INFO ai.call
+[2026. 5. 12. PM 10:06:09] INFO action.audit | 액션: shortcut.member_permission_lookup | 명령어: 혹시 내가 어떤 검을 들고있는지만 보여? | 단계: success
+[2026. 5. 12. PM 10:06:32] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 아니 아까 내가 보넨 사진에 내가 어떤 검을 들고있는지 보여?
+[2026. 5. 12. PM 10:06:51] INFO ai.call
+[2026. 5. 12. PM 10:06:57] INFO ai.call
+[2026. 5. 12. PM 10:06:57] INFO ai.call
+[2026. 5. 12. PM 10:06:57] INFO ai.call
+[2026. 5. 12. PM 10:07:31] INFO ai.call
+[2026. 5. 12. PM 10:07:33] INFO ai.call

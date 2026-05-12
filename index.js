@@ -893,7 +893,26 @@ function buildChannelContextLine(msg) {
 
   const attachmentCount = Number(msg.attachments?.size || 0);
   if (attachmentCount > 0) {
-    return `[${time}] ${displayName}: [첨부파일 ${attachmentCount}개]`;
+    const attachmentNames = Array.from(msg.attachments.values())
+      .slice(0, 3)
+      .map((attachment) => attachment.name || attachment.filename || attachment.url)
+      .filter(Boolean);
+    const attachmentSummary = attachmentNames.length
+      ? `첨부파일 ${attachmentCount}개 (${attachmentNames.join(", ")}${attachmentCount > 3 ? ", ..." : ""})`
+      : `첨부파일 ${attachmentCount}개`;
+    return `[${time}] ${displayName}: [${attachmentSummary}]`;
+  }
+
+  const embedCount = Number(msg.embeds?.length || 0);
+  if (embedCount > 0) {
+    const embedTitles = msg.embeds
+      .map((embed) => embed.title || embed.description)
+      .filter(Boolean)
+      .slice(0, 3);
+    const embedSummary = embedTitles.length
+      ? `임베드 ${embedCount}개 (${embedTitles.join(", ")}${embedCount > 3 ? ", ..." : ""})`
+      : `임베드 ${embedCount}개`;
+    return `[${time}] ${displayName}: [${embedSummary}]`;
   }
 
   return "";

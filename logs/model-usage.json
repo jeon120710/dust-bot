@@ -1,9 +1,9 @@
 {
   "date": "2026-05-12",
   "counts": {
-    "gemini-flash-latest": 13,
-    "gemini-2.5-flash": 12,
-    "gemini-3.1-flash-lite": 11,
-    "gemini-2.5-flash-lite": 6
+    "gemini-flash-latest": null,
+    "gemini-2.5-flash": 20,
+    "gemini-3.1-flash-lite": 14,
+    "gemini-2.5-flash-lite": 10
   }
 }

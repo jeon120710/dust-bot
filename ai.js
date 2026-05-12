@@ -1,6 +1,7 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import { GoogleGenAI } from "@google/genai";
+import { InferenceClient } from "@huggingface/inference";
 import { OpenAI } from "openai";
 import { GOOGLE_API_KEY, HF_TOKEN, MODEL_CANDIDATES, FORCE_MODEL_NAME } from "./config.js";
 import { logAiCall, logError } from "./logger.js";
@@ -10,6 +11,7 @@ const hfClient = HF_TOKEN ? new OpenAI({
 	baseURL: "https://router.huggingface.co/v1",
 	apiKey: HF_TOKEN,
 }) : null;
+const hfInferenceClient = HF_TOKEN ? new InferenceClient(HF_TOKEN) : null;
 const modelCooldownUntil = new Map();
 const searchUnsupportedModels = new Set();
 const WEB_SEARCH_MODELS = new Set([
@@ -691,32 +693,18 @@ export async function callSpecificModel(modelName, prompt, options = {}) {
 const HF_IMAGE_MODEL = "zai-org/GLM-OCR";
 
 export async function imageToText(imageUrl) {
-  if (!HF_TOKEN) {
+  if (!HF_TOKEN || !hfInferenceClient) {
     throw new Error("HF_TOKEN이 설정되지 않았습니다.");
   }
 
-  const imageResponse = await fetch(imageUrl);
-  if (!imageResponse.ok) {
-    throw new Error(`Failed to fetch image: ${imageResponse.status}`);
-  }
-  const imageBuffer = Buffer.from(await imageResponse.arrayBuffer());
-
-  const response = await fetch(
-    `https://api-inference.huggingface.co/models/${HF_IMAGE_MODEL}`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${HF_TOKEN}`,
-        "Content-Type": "application/octet-stream",
-      },
-      body: imageBuffer,
-    }
-  );
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Hugging Face API error: ${response.status} ${response.statusText} - ${errorText}`);
+  if (!imageUrl || typeof imageUrl !== "string") {
+    throw new Error("Invalid image URL for OCR.");
   }
 
-  return response.json();
+  const result = await hfInferenceClient.imageToText({
+    model: HF_IMAGE_MODEL,
+    inputs: imageUrl,
+  });
+
+  return result;
 }
