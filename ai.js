@@ -690,7 +690,28 @@ export async function callSpecificModel(modelName, prompt, options = {}) {
   throw err;
 }
 
-const HF_IMAGE_MODEL = "zai-org/GLM-OCR";
+const HF_IMAGE_MODEL = "microsoft/table-transformer-detection";
+
+function formatDetectionOutput(output) {
+  if (!Array.isArray(output)) {
+    return JSON.stringify(output);
+  }
+
+  if (output.length === 0) {
+    return "표가 감지되지 않았습니다.";
+  }
+
+  const items = output.map((item, index) => {
+    const label = String(item.label || "unknown");
+    const score = typeof item.score === "number" ? item.score.toFixed(3) : String(item.score || "");
+    const box = item.box
+      ? `(${Math.round(item.box.xmin)},${Math.round(item.box.ymin)})-(${Math.round(item.box.xmax)},${Math.round(item.box.ymax)})`
+      : "";
+    return `${index + 1}. ${label}${score ? ` (${score})` : ""}${box ? ` ${box}` : ""}`;
+  });
+
+  return `표/객체 ${output.length}개 감지됨: ${items.join("; ")}`;
+}
 
 export async function imageToText(imageUrl) {
   if (!HF_TOKEN || !hfInferenceClient) {
@@ -701,10 +722,10 @@ export async function imageToText(imageUrl) {
     throw new Error("Invalid image URL for OCR.");
   }
 
-  const result = await hfInferenceClient.imageToText({
+  const result = await hfInferenceClient.objectDetection({
     model: HF_IMAGE_MODEL,
     inputs: imageUrl,
   });
 
-  return result;
+  return formatDetectionOutput(result);
 }
