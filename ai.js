@@ -1,7 +1,6 @@
 ﻿import fs from "node:fs";
 import path from "node:path";
 import { GoogleGenAI } from "@google/genai";
-import { InferenceClient } from "@huggingface/inference";
 import { OpenAI } from "openai";
 import { GOOGLE_API_KEY, HF_TOKEN, MODEL_CANDIDATES, FORCE_MODEL_NAME } from "./config.js";
 import { logAiCall, logError } from "./logger.js";
@@ -11,7 +10,6 @@ const hfClient = HF_TOKEN ? new OpenAI({
 	baseURL: "https://router.huggingface.co/v1",
 	apiKey: HF_TOKEN,
 }) : null;
-const hfInferenceClient = HF_TOKEN ? new InferenceClient(HF_TOKEN) : null;
 const modelCooldownUntil = new Map();
 const searchUnsupportedModels = new Set();
 const WEB_SEARCH_MODELS = new Set([
@@ -188,7 +186,10 @@ function isHardQuotaExceededError(err) {
     (msg.includes("quota exceeded") ||
       msg.includes("free_tier_requests") ||
       msg.includes("perday") ||
-      msg.includes("per day"))
+      msg.includes("per day") ||
+      msg.includes("daily limit") ||
+      msg.includes("day limit") ||
+      msg.includes("daily quota"))
   );
 }
 
@@ -420,7 +421,18 @@ async function generateWithHuggingFace(modelName, prompt, options = {}) {
     throw buildHttpError(401, "hf_token_missing");
   }
 
-  const textPrompt = prompt
+  let promptMessages;
+  if (Array.isArray(prompt)) {
+    promptMessages = prompt;
+  } else if (typeof prompt === "string") {
+    promptMessages = [{ role: "user", text: prompt }];
+  } else if (prompt && typeof prompt === "object" && prompt.role && prompt.text) {
+    promptMessages = [prompt];
+  } else {
+    promptMessages = [{ role: "user", text: String(prompt || "") }];
+  }
+
+  const textPrompt = promptMessages
     .map((p) => `${p.role}: ${p.parts ? p.parts.map((part) => part.text).join("") : p.text}`)
     .join("\n\n");
 
@@ -690,7 +702,7 @@ export async function callSpecificModel(modelName, prompt, options = {}) {
   throw err;
 }
 
-const HF_IMAGE_MODEL = "microsoft/table-transformer-detection";
+const HF_IMAGE_MODEL = "moonshotai/Kimi-K2.5:novita";
 
 function formatDetectionOutput(output) {
   if (!Array.isArray(output)) {
@@ -713,8 +725,28 @@ function formatDetectionOutput(output) {
   return `표/객체 ${output.length}개 감지됨: ${items.join("; ")}`;
 }
 
+function extractChatMessageText(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => {
+        if (typeof item === "string") return item;
+        if (item && typeof item === "object") return String(item.text || item?.content || "");
+        return "";
+      })
+      .filter(Boolean)
+      .join("");
+  }
+  if (content && typeof content === "object") {
+    return String(content.text || content?.content || "");
+  }
+  return "";
+}
+
 export async function imageToText(imageUrl) {
-  if (!HF_TOKEN || !hfInferenceClient) {
+  if (!HF_TOKEN || !hfClient) {
     throw new Error("HF_TOKEN이 설정되지 않았습니다.");
   }
 
@@ -722,10 +754,29 @@ export async function imageToText(imageUrl) {
     throw new Error("Invalid image URL for OCR.");
   }
 
-  const result = await hfInferenceClient.objectDetection({
+  const response = await hfClient.chat.completions.create({
     model: HF_IMAGE_MODEL,
-    inputs: imageUrl,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Describe this image in one sentence.",
+          },
+          {
+            type: "image_url",
+            image_url: {
+              url: imageUrl,
+            },
+          },
+        ],
+      },
+    ],
+    temperature: 0.2,
+    max_tokens: 150,
   });
 
-  return formatDetectionOutput(result);
+  const text = extractChatMessageText(response?.choices?.[0]?.message?.content);
+  return text || "이미지 설명을 생성할 수 없습니다.";
 }

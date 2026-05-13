@@ -51,17 +51,7 @@ export function parseAiAction(aiResponse) {
       return parsed;
     }
   } catch {
-    const objectMatch = cleaned.match(/\{[\s\S]*\}/);
-    if (objectMatch) {
-      try {
-        const recovered = JSON.parse(objectMatch[0]);
-        if (recovered && typeof recovered === "object" && typeof recovered.action === "string") {
-          return recovered;
-        }
-      } catch {
-        // no-op
-      }
-    }
+    // JSON 파싱 실패 시 reply로 처리
   }
 
   return {

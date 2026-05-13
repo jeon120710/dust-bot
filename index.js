@@ -244,70 +244,103 @@ async function classifyPowerControlIntent(text) {
   return { intent: "none", reason: "invalid_ai_response" };
 }
 
-function parseDirectResetCommand(text) {
+async function parseDirectResetCommand(text) {
   const normalized = String(text || "").trim();
-  const match = normalized.match(/^!reset-memory\b(.*)$/i);
-  if (!match) {
-    return { intent: "none", argsText: "", reason: "not_reset_memory" };
-  }
+  if (!normalized) return { intent: "none", argsText: "", reason: "empty" };
 
-  return {
-    intent: "reset_memory",
-    argsText: String(match[1] || "").trim(),
-    reason: "parsed_direct_command",
-  };
-}
+  const prompt = `
+당신은 디스코드 리셋 메모리 명령 파서입니다.
+아래 메시지가 "!reset-memory" 명령인지 판단하고, 인자를 추출하세요.
 
-function parseAdminModelRequest(text) {
-  const normalized = String(text || "").trim();
-  const modelTrigger = /(?:모델\s*호출해봐|호출해봐\s*모델|모델\s*호출)/i;
-  if (!modelTrigger.test(normalized)) return null;
+출력은 JSON 객체 1개만:
+{"isReset":true,"args":"인자"} 또는 {"isReset":false}
 
-  const matchWithPrefix = normalized.match(/^(.+?)\s+모델\s*호출해봐\s*(.*)$/i);
-  if (matchWithPrefix) {
-    const modelName = String(matchWithPrefix[1] || "").trim();
-    const prompt = String(matchWithPrefix[2] || "").trim();
-    if (!modelName) return null;
-    return { modelName, prompt };
-  }
+규칙:
+- "!reset-memory"로 시작해야 함
+- 그 뒤의 텍스트가 인자
 
-  const matchWithSuffix = normalized.match(/^모델\s*호출해봐\s+(.+)$/i);
-  if (matchWithSuffix) {
-    const rest = String(matchWithSuffix[1] || "").trim();
-    const tokens = rest.split(/\s+/);
-    const candidate = String(tokens[0] || "").trim();
-    if (candidate.includes("/") || candidate.includes(":")) {
+message: "${normalized}"
+`;
+
+  try {
+    const resultText = await callModel(prompt);
+    const parsed = safeParseJsonObject(resultText);
+    if (parsed?.isReset) {
       return {
-        modelName: candidate,
-        prompt: tokens.slice(1).join(" ").trim(),
+        intent: "reset_memory",
+        argsText: String(parsed.args || "").trim(),
+        reason: "ai_parsed",
       };
     }
-    return null;
+  } catch {
+    // ignore
   }
 
-  const genericModelMatch = normalized.match(/([a-z0-9_.\-/:]+:[a-z0-9_.\-]+|[a-z0-9_.\-]+\/[a-z0-9_.\-:]+)/i);
-  if (genericModelMatch) {
-    return {
-      modelName: String(genericModelMatch[0] || "").trim(),
-      prompt: normalized.replace(genericModelMatch[0], "").replace(modelTrigger, "").trim(),
-    };
+  return { intent: "none", argsText: "", reason: "not_reset_memory" };
+}
+
+async function parseAdminModelRequest(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return null;
+
+  const prompt = `
+당신은 디스코드 관리자 모델 요청 파서입니다.
+아래 메시지가 "모델 호출해봐" 같은 요청인지 판단하고, 모델 이름과 프롬프트를 추출하세요.
+
+출력은 JSON 객체 1개만:
+{"isModelRequest":true,"modelName":"모델이름","prompt":"프롬프트"} 또는 {"isModelRequest":false}
+
+규칙:
+- "모델 호출해봐", "호출해봐 모델" 등이 포함되어야 함
+- 모델 이름은 a/b:c 형식이나 a:b 형식
+- 프롬프트는 모델 이름 외의 텍스트
+
+message: "${normalized}"
+`;
+
+  try {
+    const resultText = await callModel(prompt);
+    const parsed = safeParseJsonObject(resultText);
+    if (parsed?.isModelRequest && parsed?.modelName) {
+      return { modelName: parsed.modelName, prompt: parsed.prompt || "" };
+    }
+  } catch {
+    // ignore
   }
 
   return null;
 }
 
-function parseAdminCodeRequest(text) {
+async function parseAdminCodeRequest(text) {
   const normalized = String(text || "").trim();
-  const codeTrigger = /(내부\s*코드|내부코드|소스\s*코드|소스코드|코드\s*보여줘|코드\s*달라|코드\s*줘)/i;
-  if (!codeTrigger.test(normalized)) return null;
+  if (!normalized) return null;
 
-  const fileMatch = normalized.match(/\b(index\.js|ai\.js|actions\.js|handlers\.js|utils\.js|config\.js|errorDoctor\.js|assets\.js|permissionEmbed\.js|permissions\.js|database\.js|logger\.js)\b/i);
-  const methodMatch = normalized.match(/\b(?:function|함수|메소드)\s+([A-Za-z0-9_]+)\b/i);
+  const prompt = `
+당신은 디스코드 관리자 코드 요청 파서입니다.
+아래 메시지가 코드 보여달라는 요청인지 판단하고, 파일명과 함수명을 추출하세요.
 
-  return {
-    fileName: fileMatch ? String(fileMatch[1]).toLowerCase() : "index.js",
-    functionName: methodMatch ? String(methodMatch[1]) : null,
-  };
+출력은 JSON 객체 1개만:
+{"isCodeRequest":true,"fileName":"파일명","functionName":"함수명"} 또는 {"isCodeRequest":false}
+
+규칙:
+- "내부 코드", "소스 코드", "코드 보여줘" 등이 포함되어야 함
+- 파일명은 index.js, ai.js 등
+- 함수명은 있으면 추출, 없으면 null
+
+message: "${normalized}"
+`;
+
+  try {
+    const resultText = await callModel(prompt);
+    const parsed = safeParseJsonObject(resultText);
+    if (parsed?.isCodeRequest && parsed?.fileName) {
+      return { fileName: parsed.fileName, functionName: parsed.functionName || null };
+    }
+  } catch {
+    // ignore
+  }
+
+  return null;
 }
 
 function extractFunctionSnippet(source, functionName) {
