@@ -498,11 +498,6 @@ async function tryGenerateWithRetries(modelName, prompt, options = {}) {
           `Model retry (${modelName}) rate_limited attempt=${attempt}/${MAX_ATTEMPTS_PER_MODEL}, delayMs=${delayMs}, status=${err?.status || ""}, cause=${err?.cause?.code || ""}`,
         );
 
-        if (attempt < MAX_ATTEMPTS_PER_MODEL) {
-          await sleep(delayMs);
-          continue;
-        }
-
         logAiCall(modelName, prompt, null, false, err);
         return { ok: false, kind: "temporary", err, cooldownMs: delayMs };
       }
@@ -616,6 +611,7 @@ export async function callModel(prompt, options = {}) {
     }
 
     if (outcome.kind === "temporary") {
+      currentModelIndex = (i + 1) % totalModels;
       sawTemporaryFailure = true;
       const cooldownMs = Math.min(MAX_COOLDOWN_MS, outcome.cooldownMs || 1500);
       const until = Date.now() + cooldownMs;
@@ -626,6 +622,7 @@ export async function callModel(prompt, options = {}) {
     }
 
     if (outcome.kind === "permanent") {
+      currentModelIndex = (i + 1) % totalModels;
       if (isHardQuotaExceededError(outcome.err)) {
         markQuotaExhausted(modelName);
       }
@@ -634,18 +631,21 @@ export async function callModel(prompt, options = {}) {
     }
 
     if (outcome.kind === "search_unsupported") {
+      currentModelIndex = (i + 1) % totalModels;
       searchUnsupportedModels.add(modelName);
       console.warn(`Model failed (${modelName}). failover=true search_unsupported status=${outcome.err?.status || ""}`);
       continue;
     }
 
     if (outcome.kind === "quota_exhausted_hard") {
+      currentModelIndex = (i + 1) % totalModels;
       markQuotaExhausted(modelName);
       console.warn(`Model failed (${modelName}). failover=true quota_exhausted_hard status=${outcome.err?.status || ""}`);
       continue;
     }
 
     if (outcome.kind === "quota_exhausted_soft") {
+      currentModelIndex = (i + 1) % totalModels;
       sawTemporaryFailure = true;
       const cooldownMs = Math.min(MAX_COOLDOWN_MS, outcome.cooldownMs || 1500);
       const until = Date.now() + cooldownMs;
@@ -656,6 +656,7 @@ export async function callModel(prompt, options = {}) {
     }
 
     if (outcome.kind === "fatal") {
+      currentModelIndex = (i + 1) % totalModels;
       console.warn(`Model failed (${modelName}). failover=true fatal status=${outcome.err?.status || ""} message=${String(outcome.err?.message || "")}`);
       continue;
     }

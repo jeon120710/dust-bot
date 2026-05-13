@@ -248,32 +248,13 @@ async function parseDirectResetCommand(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return { intent: "none", argsText: "", reason: "empty" };
 
-  const prompt = `
-당신은 디스코드 리셋 메모리 명령 파서입니다.
-아래 메시지가 "!reset-memory" 명령인지 판단하고, 인자를 추출하세요.
-
-출력은 JSON 객체 1개만:
-{"isReset":true,"args":"인자"} 또는 {"isReset":false}
-
-규칙:
-- "!reset-memory"로 시작해야 함
-- 그 뒤의 텍스트가 인자
-
-message: "${normalized}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    if (parsed?.isReset) {
-      return {
-        intent: "reset_memory",
-        argsText: String(parsed.args || "").trim(),
-        reason: "ai_parsed",
-      };
-    }
-  } catch {
-    // ignore
+  const match = normalized.match(/^!reset-memory\b\s*(.*)$/i);
+  if (match) {
+    return {
+      intent: "reset_memory",
+      argsText: String(match[1] || "").trim(),
+      reason: "direct_parse",
+    };
   }
 
   return { intent: "none", argsText: "", reason: "not_reset_memory" };
@@ -800,39 +781,90 @@ async function classifyCodeReferencePlan(input) {
     return { useCodeReference: false, searchTerms: [], reason: "empty_input" };
   }
 
-  const prompt = `
-당신은 디스코드 봇 요청 분석기입니다.
-아래 사용자 요청에 대해, 답변 시 "봇 코드 참고 정보"가 필요한지 판단하세요.
+  const normalized = text.toLowerCase();
+  const codeTriggers = [
+    "코드",
+    "소스",
+    "함수",
+    "메서드",
+    "메소드",
+    "구현",
+    "내부",
+    "동작",
+    "작동",
+    "로직",
+    "버그",
+    "오류",
+    "에러",
+    "디버그",
+    "정의",
+    "설계",
+    "함수명",
+    "메서드명",
+    "미들웨어",
+    "라이브러리",
+    "모듈",
+    "구조",
+    "작업",
+  ];
 
-출력 형식(JSON 1개만):
-{"useCodeReference":true|false,"searchTerms":["..."],"reason":"짧은 근거"}
-
-규칙:
-- 기능 존재 여부, 지원 가능 여부, 명령 가능 여부, 내부 동작/구현/코드 설명 질문이면 useCodeReference=true
-- 일반 잡담, 단순 실행 요청(타임아웃/킥/밴/역할 변경 등), 코드와 무관한 질문이면 false
-- searchTerms는 코드 검색용 핵심 키워드 1~8개
-- searchTerms에는 함수명, 액션명, 명령어명, 기능명 같은 실질 토큰을 넣고 군더더기는 제외
-- useCodeReference=false면 searchTerms는 빈 배열
-- 애매하면 false
-
-사용자 요청:
-"${text.replace(/"/g, '\\"')}"
-`;
-
-  try {
-    const resultText = await callModel(prompt);
-    const parsed = safeParseJsonObject(resultText);
-    if (!parsed || typeof parsed !== "object") {
-      return { useCodeReference: false, searchTerms: [], reason: "invalid_ai_response" };
-    }
-    const useCodeReference = parsed.useCodeReference === true;
-    const searchTerms = useCodeReference ? normalizeCodeSearchTerms(parsed.searchTerms) : [];
-    const reason = typeof parsed.reason === "string" ? parsed.reason : "";
-    return { useCodeReference, searchTerms: searchTerms.slice(0, 8), reason };
-  } catch (err) {
-    logError("code.reference.classify", err, { input: text });
-    return { useCodeReference: false, searchTerms: [], reason: "classify_error" };
+  const useCodeReference = codeTriggers.some((keyword) => normalized.includes(keyword));
+  if (!useCodeReference) {
+    return { useCodeReference: false, searchTerms: [], reason: "no_code_keywords" };
   }
+
+  const rawTerms = Array.from(
+    new Set(
+      (text.match(/[가-힣a-zA-Z0-9_]+/g) || [])
+        .map((token) => String(token || "").trim().toLowerCase())
+        .filter((token) => token.length >= 2 && !/^\d+$/.test(token)),
+    ),
+  );
+
+  const stopwords = new Set([
+    "이",
+    "그",
+    "저",
+    "것",
+    "수",
+    "더",
+    "다",
+    "를",
+    "은",
+    "는",
+    "가",
+    "에",
+    "도",
+    "와",
+    "과",
+    "으로",
+    "만",
+    "을",
+    "고",
+    "지",
+    "나",
+    "왜",
+    "어떻게",
+    "무엇",
+    "무슨",
+    "어떤",
+    "있",
+    "없",
+    "할",
+    "합니다",
+    "해주세요",
+    "해주세요",
+  ]);
+
+  const searchTerms = normalizeCodeSearchTerms(
+    rawTerms.filter((term) => !stopwords.has(term) && term.length >= 2),
+  );
+
+  return {
+    useCodeReference: true,
+    searchTerms: searchTerms.slice(0, 8),
+    reason: searchTerms.length > 0 ? "keyword_match" : "keyword_only",
+  };
 }
 
 function getCachedCodeFile(relativePath) {
@@ -1019,8 +1051,14 @@ client.on("messageCreate", async (message) => {
   let adminModelRequest = null;
   let adminCodeRequest = null;
   if (isAbsolutePowerUser && rawText && !isCommandMessage) {
-    adminModelRequest = parseAdminModelRequest(rawText);
-    adminCodeRequest = parseAdminCodeRequest(rawText);
+    const modelTrigger = /\b모델\b|모델\s*호출|호출\s*모델|model/i;
+    const codeTrigger = /\b코드\b|내부 코드|소스 코드|코드 보여줘/i;
+    if (modelTrigger.test(rawText)) {
+      adminModelRequest = parseAdminModelRequest(rawText);
+    }
+    if (codeTrigger.test(rawText)) {
+      adminCodeRequest = parseAdminCodeRequest(rawText);
+    }
   }
 
   if (adminCodeRequest) {

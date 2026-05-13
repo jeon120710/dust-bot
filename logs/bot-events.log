@@ -93,3 +93,79 @@
 [2026. 5. 13. PM 5:37:09] INFO ai.call
 [2026. 5. 13. PM 5:37:41] INFO ai.call
 [2026. 5. 13. PM 5:37:47] INFO ai.call
+[2026. 5. 13. PM 9:21:18] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:21] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:21] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:21] INFO ai.call
+[2026. 5. 13. PM 9:21:22] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:23] INFO ai.call
+[2026. 5. 13. PM 9:21:23] INFO ai.call
+[2026. 5. 13. PM 9:21:24] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:26] INFO ai.call
+[2026. 5. 13. PM 9:21:26] INFO ai.call
+[2026. 5. 13. PM 9:21:28] INFO ai.call
+[2026. 5. 13. PM 9:21:29] INFO ai.call
+[2026. 5. 13. PM 9:21:34] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:39] INFO ai.call
+[2026. 5. 13. PM 9:21:41] INFO ai.call
+[2026. 5. 13. PM 9:21:43] INFO ai.call
+[2026. 5. 13. PM 9:21:48] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:50] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:21:50] INFO ai.call
+[2026. 5. 13. PM 9:21:51] INFO ai.call
+[2026. 5. 13. PM 9:21:51] INFO ai.call
+[2026. 5. 13. PM 9:21:52] INFO ai.call
+[2026. 5. 13. PM 9:21:52] ERROR process.uncaughtException
+  메시지: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+  에러: Invalid Form Body
+content[BASE_TYPE_MAX_LENGTH]: Must be 2000 or fewer in length.
+[2026. 5. 13. PM 9:41:43] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: just_39479 | 명령어: 너 뭐해
+[2026. 5. 13. PM 9:41:44] INFO ai.call
+[2026. 5. 13. PM 9:41:51] INFO ai.call
+[2026. 5. 13. PM 9:41:53] INFO ai.call
+[2026. 5. 13. PM 9:41:59] INFO ai.call
+[2026. 5. 13. PM 10:16:40] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: jjibosea_27023 | 명령어: 먼지 머먼지 머 먼 먼지에 먼지 머머머먼 먼지 먼 지 먼지 머머머먼지지 먼 지지 먼지...
+[2026. 5. 13. PM 10:16:45] INFO ai.call
+[2026. 5. 13. PM 10:16:52] INFO ai.call
+[2026. 5. 13. PM 10:16:59] INFO ai.call
+[2026. 5. 13. PM 10:17:22] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: jjibosea_27023 | 명령어: 해마 이모티콘 써줘
+[2026. 5. 13. PM 10:18:07] INFO ai.call
+[2026. 5. 13. PM 10:18:10] INFO ai.call
+[2026. 5. 13. PM 10:18:20] INFO ai.call
+[2026. 5. 13. PM 10:19:06] INFO command.trigger | 서버: ✧ 𝓝𝓸𝓿𝓪 ☽ | 사용자: jjibosea_27023 | 명령어: 말 말고 "해마" 바다에 사는 해마 말이야
+[2026. 5. 13. PM 10:19:10] INFO ai.call
+[2026. 5. 13. PM 10:19:15] INFO ai.call
+[2026. 5. 13. PM 10:19:30] INFO ai.call
