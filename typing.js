@@ -252,7 +252,7 @@ async function tryHandleTypingGameSubmission(message) {
   const wpm = calcWpm(game.sentence.length, elapsedMs);
 
   if (game.mode === "solo") {
-    if (message.author.id !== game.hostUserId) return true;
+    if (message.author.id !== game.hostUserId) return false;
 
     game.results.push({ userId: message.author.id, username: message.author.username, elapsedMs, wpm });
     if (game.timeoutHandle) clearTimeout(game.timeoutHandle);
@@ -261,7 +261,7 @@ async function tryHandleTypingGameSubmission(message) {
     return true;
   }
 
-  if (game.participants.has(message.author.id)) return true;
+  if (game.participants.has(message.author.id)) return false;
 
   game.participants.add(message.author.id);
   game.results.push({ userId: message.author.id, username: message.author.username, elapsedMs, wpm });

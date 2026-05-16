@@ -1036,66 +1036,23 @@ client.on("messageCreate", async (message) => {
   const rawText = String(message.content || "").trim();
   const isAbsolutePowerUser = message.author?.id === ABSOLUTE_POWER_USER_ID;
   const isPrefixedCommand = rawText.startsWith(PREFIX);
-  const directCommandCandidate = !isPrefixedCommand && rawText.startsWith("!");
   let directCommandIntent = { intent: "none", argsText: "", reason: "" };
-  if (directCommandCandidate) {
-    directCommandIntent = parseDirectResetCommand(rawText);
+  let isDirectResetCommand = false;
+  if (!isPrefixedCommand) {
+    const resetMatch = rawText.match(/^!reset[_-]memory\b\s*(.*)$/i);
+    if (resetMatch) {
+      isDirectResetCommand = true;
+      directCommandIntent = {
+        intent: "reset_memory",
+        argsText: String(resetMatch[1] || "").trim(),
+        reason: "direct_parse",
+      };
+    }
   }
-  const isDirectResetCommand = directCommandIntent.intent === "reset_memory";
   const isCommandMessage = isPrefixedCommand || isDirectResetCommand;
-  let adminModelRequest = null;
-  let adminCodeRequest = null;
-  if (isAbsolutePowerUser && rawText && !isCommandMessage) {
-    const isModelRequest = await detectModelTrigger(rawText);
-    const isCodeRequest = await detectCodeTrigger(rawText);
-    if (isModelRequest) {
-      adminModelRequest = await parseAdminModelRequest(rawText);
-    }
-    if (isCodeRequest) {
-      adminCodeRequest = await parseAdminCodeRequest(rawText);
-    }
-  }
-
-  if (adminCodeRequest) {
-    const snippet = getAdminCodeSnippet(adminCodeRequest);
-    if (snippet.error && snippet.text) {
-      await message.reply(`${snippet.error}\n${snippet.text}`);
-    } else if (snippet.error) {
-      await message.reply(snippet.error);
-    } else {
-      await message.reply(snippet.text);
-    }
-    return;
-  }
-
-  if (adminModelRequest) {
-    const statusMessage = await message.reply("-# <a:load:1495336917326368829> 관리자 모델 호출 중...");
-    if (message.channel?.isTextBased?.()) {
-      try {
-        await message.channel.sendTyping();
-      } catch {
-        // ignore typing errors
-      }
-    }
-
-    const prompt = adminModelRequest.prompt || "이 모델을 테스트하기 위한 간단한 한국어 응답을 생성해 주세요.";
-    try {
-      const result = await callSpecificModel(adminModelRequest.modelName, prompt, { channel: message.channel });
-      const responseText = typeof result === "string" ? result : result.text || JSON.stringify(result);
-      await statusMessage.edit(`모델 ${adminModelRequest.modelName} 호출 결과:\n${responseText}`);
-    } catch (err) {
-      await statusMessage.edit(`모델 호출에 실패했습니다: ${String(err?.message || err)}`);
-    }
-    return;
-  }
 
   const nowMs = Date.now();
   const pendingKey = buildPendingKey(message);
-  let powerControlIntent = { intent: "none", reason: "" };
-
-  if (isAbsolutePowerUser && !isCommandMessage && rawText) {
-    powerControlIntent = await classifyPowerControlIntent(rawText);
-  }
 
   // !reload-assets: 자산 데이터 새로고침 (특정 관리자 전용)
   if ((rawText === "!reload-assets" || rawText === "!업데이트") && message.author.id === ABSOLUTE_POWER_USER_ID) {
@@ -1119,7 +1076,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
-  if (isAbsolutePowerUser && rawText && !isCommandMessage) {
+  if (isAbsolutePowerUser && rawText) {
     const pending = pendingRestartConfirm.get(pendingKey);
     if (pending) {
       const ageMs = nowMs - pending.requestedAt;
@@ -1179,8 +1136,9 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (!pendingRestartConfirm.has(pendingKey)) {
-      if (powerControlIntent.intent === "restart") {
+    if (!pendingRestartConfirm.has(pendingKey) && isPrefixedCommand) {
+      const restartIntent = await classifyPowerControlIntent(rawText.slice(PREFIX.length).trim());
+      if (restartIntent.intent === "restart") {
         pendingRestartConfirm.set(pendingKey, {
           requestedAt: nowMs,
           channelId: message.channel?.id || null,
@@ -1203,7 +1161,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  if (isAbsolutePowerUser && rawText && !isCommandMessage) {
+  if (isAbsolutePowerUser && rawText) {
     const pending = pendingShutdownConfirm.get(pendingKey);
     if (pending) {
       const ageMs = nowMs - pending.requestedAt;
@@ -1263,8 +1221,9 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (!pendingShutdownConfirm.has(pendingKey)) {
-      if (powerControlIntent.intent === "shutdown") {
+    if (!pendingShutdownConfirm.has(pendingKey) && isPrefixedCommand) {
+      const shutdownIntent = await classifyPowerControlIntent(rawText.slice(PREFIX.length).trim());
+      if (shutdownIntent.intent === "shutdown") {
         pendingShutdownConfirm.set(pendingKey, {
           requestedAt: nowMs,
           channelId: message.channel?.id || null,
@@ -1288,7 +1247,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const pendingPrivileged = pendingPrivilegedAction.get(pendingKey);
-  if (pendingPrivileged) {
+  if (pendingPrivileged && pendingPrivileged.message?.author?.id === message.author?.id) {
     const ageMs = nowMs - pendingPrivileged.requestedAt;
     if (ageMs > PRIVILEGED_ACTION_TTL_MS) {
       pendingPrivilegedAction.delete(pendingKey);
@@ -1329,7 +1288,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const pendingTarget = pendingTargetConfirm.get(pendingKey);
-  if (pendingTarget) {
+  if (pendingTarget && pendingTarget.message?.author?.id === message.author?.id) {
     const ageMs = nowMs - pendingTarget.requestedAt;
     if (ageMs > TARGET_CONFIRM_TTL_MS) {
       pendingTargetConfirm.delete(pendingKey);
@@ -1428,6 +1387,56 @@ client.on("messageCreate", async (message) => {
     return;
   }
   if (!isPrefixedCommand && !isDirectResetCommand) return;
+
+  let adminModelRequest = null;
+  let adminCodeRequest = null;
+  if (isAbsolutePowerUser && isPrefixedCommand) {
+    const adminInput = rawText.slice(PREFIX.length).trim();
+    if (adminInput) {
+      const isModelRequest = await detectModelTrigger(adminInput);
+      const isCodeRequest = await detectCodeTrigger(adminInput);
+      if (isModelRequest) {
+        adminModelRequest = await parseAdminModelRequest(adminInput);
+      }
+      if (isCodeRequest) {
+        adminCodeRequest = await parseAdminCodeRequest(adminInput);
+      }
+    }
+  }
+
+  if (adminCodeRequest) {
+    const snippet = getAdminCodeSnippet(adminCodeRequest);
+    if (snippet.error && snippet.text) {
+      await message.reply(`${snippet.error}\n${snippet.text}`);
+    } else if (snippet.error) {
+      await message.reply(snippet.error);
+    } else {
+      await message.reply(snippet.text);
+    }
+    return;
+  }
+
+  if (adminModelRequest) {
+    const statusMessage = await message.reply("-# <a:load:1495336917326368829> 관리자 모델 호출 중...");
+    if (message.channel?.isTextBased?.()) {
+      try {
+        await message.channel.sendTyping();
+      } catch {
+        // ignore typing errors
+      }
+    }
+
+    const prompt = adminModelRequest.prompt || "이 모델을 테스트하기 위한 간단한 한국어 응답을 생성해 주세요.";
+    try {
+      const result = await callSpecificModel(adminModelRequest.modelName, prompt, { channel: message.channel });
+      const responseText = typeof result === "string" ? result : result.text || JSON.stringify(result);
+      await statusMessage.edit(`모델 ${adminModelRequest.modelName} 호출 결과:\n${responseText}`);
+    } catch (err) {
+      await statusMessage.edit(`모델 호출에 실패했습니다: ${String(err?.message || err)}`);
+    }
+    return;
+  }
+
   const statusMessage = await message.reply("-# <a:load:1495336917326368829> 생각중...");
   if (message.channel?.isTextBased?.()) {
     try {

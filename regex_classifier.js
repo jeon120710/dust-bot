@@ -80,7 +80,7 @@ ${String(source || "").slice(0, 8000)}
 // 3. 모델 트리거 감지
 export async function detectModelTrigger(text) {
   const normalized = String(text || "");
-  if (/모델|호출|테스트|model|call/i.test(normalized)) {
+  if (/(?:^|\s)(?:모델\s*호출|호출\s*모델|model\s*call)(?:\s|$)/i.test(normalized)) {
     return true;
   }
 
@@ -112,34 +112,11 @@ export async function detectModelTrigger(text) {
 // 4. 코드 트리거 감지
 export async function detectCodeTrigger(text) {
   const normalized = String(text || "").toLowerCase();
-  const codeTriggers = [
-    "코드",
-    "소스",
-    "함수",
-    "메서드",
-    "메소드",
-    "구현",
-    "내부",
-    "동작",
-    "작동",
-    "로직",
-    "버그",
-    "오류",
-    "에러",
-    "디버그",
-    "정의",
-    "설계",
-    "함수명",
-    "메서드명",
-    "미들웨어",
-    "라이브러리",
-    "모듈",
-    "구조",
-    "source",
-    "code",
-    "implementation",
-  ];
-  if (codeTriggers.some((keyword) => normalized.includes(keyword))) {
+  if (
+    /(?:내부\s*코드|소스\s*코드|코드\s*보여|코드\s*조회|함수\s*보여|\.js\b|source\s*code)/i.test(
+      normalized,
+    )
+  ) {
     return true;
   }
 
