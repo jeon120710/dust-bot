@@ -1,10 +1,10 @@
 {
-  "date": "2026-05-13",
+  "date": "2026-05-14",
   "counts": {
-    "gemini-flash-latest": null,
-    "gemini-2.5-flash": 20,
-    "gemini-3.1-flash-lite": 20,
-    "gemini-2.5-flash-lite": 20,
-    "deepseek-ai/DeepSeek-V4-Flash:novita": 11
+    "gemini-flash-latest": 2,
+    "gemini-2.5-flash": 1,
+    "gemini-3.1-flash-lite": 1,
+    "gemini-2.5-flash-lite": 1,
+    "deepseek-ai/DeepSeek-V4-Flash:novita": 1
   }
 }

@@ -1,4 +1,4 @@
-﻿﻿import { 
+﻿import { 
   Client, 
   GatewayIntentBits, 
   PermissionFlagsBits, 
@@ -46,9 +46,18 @@ import { buildWebSearchSourcesEmbed } from "./sourceEmbed.js";
 import { handleGambleInteraction } from "./gamble.js";
 import { reloadAssets } from "./assets.js";
 import { analyzeLatestErrors, attemptErrorRepair } from "./errorDoctor.js";
+import { getWeatherForecast, formatWeatherMessage, getAvailableRegionsText } from "./weather.js";
+import {
+  detectResetMemoryCommand,
+  detectModelTrigger,
+  detectCodeTrigger,
+  extractTokens,
+  parseWeatherRequest,
+} from "./regex_classifier.js";
 
 
 const client = new Client({
+  ...getShardOptionsFromEnv(),
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
@@ -57,7 +66,7 @@ const client = new Client({
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildVoiceStates,
   ],
-  partials: ["MESSAGE", "REACTION"],
+  partials: ["MESSAGE", "REACTION", "CHANNEL"],
 });
 
 function getShardOptionsFromEnv() {
@@ -248,12 +257,12 @@ async function parseDirectResetCommand(text) {
   const normalized = String(text || "").trim();
   if (!normalized) return { intent: "none", argsText: "", reason: "empty" };
 
-  const match = normalized.match(/^!reset-memory\b\s*(.*)$/i);
-  if (match) {
+  const result = await detectResetMemoryCommand(normalized);
+  if (result.isReset) {
     return {
       intent: "reset_memory",
-      argsText: String(match[1] || "").trim(),
-      reason: "direct_parse",
+      argsText: result.argsText,
+      reason: "ai_detected",
     };
   }
 
@@ -289,6 +298,13 @@ message: "${normalized}"
     // ignore
   }
 
+  const modelMatch = normalized.match(
+    /(?:모델\s*호출|호출\s*모델|model\s*call)\s*(?:해봐|해줘|해|하세요)?\s*[`"']?([a-zA-Z0-9_./:-]+)[`"']?\s*(.*)$/i,
+  );
+  if (modelMatch?.[1]) {
+    return { modelName: modelMatch[1].trim(), prompt: String(modelMatch[2] || "").trim() };
+  }
+
   return null;
 }
 
@@ -321,24 +337,34 @@ message: "${normalized}"
     // ignore
   }
 
+  const fileMatch = normalized.match(/\b([a-z0-9_-]+\.js)\b/i);
+  const fnMatch = normalized.match(/\b(?:함수|function)\s+([a-zA-Z0-9_$]+)/i);
+  if (fileMatch?.[1]) {
+    return {
+      fileName: fileMatch[1].toLowerCase(),
+      functionName: fnMatch?.[1] || null,
+    };
+  }
+
   return null;
 }
 
 function extractFunctionSnippet(source, functionName) {
   const lines = String(source || "").split("\n");
+  const escapedName = String(functionName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const signatureRegex = new RegExp(
-    `^(?:export\s+)?(?:async\s+)?(?:function\s+${functionName}|(?:const|let|var)\s+${functionName}\s*=|${functionName}\s*=\s*\(?)(?:.*)$`,
+    `^(?:export\\s+)?(?:async\\s+)?(?:function\\s+${escapedName}|(?:const|let|var)\\s+${escapedName}\\s*=|${escapedName}\\s*=\\s*\\(?)(?:.*)$`,
     "i",
   );
 
-  const startIndex = lines.findIndex((line) => signatureRegex.test(line.trim()));
-  if (startIndex === -1) return null;
+  const funcStartIdx = lines.findIndex((line) => signatureRegex.test(line.trim()));
+  if (funcStartIdx === -1) return null;
 
   const snippetLines = [];
   let braceCount = 0;
   let foundBlock = false;
 
-  for (let i = startIndex; i < lines.length; i += 1) {
+  for (let i = funcStartIdx; i < lines.length; i += 1) {
     const line = lines[i];
     snippetLines.push(line);
     const openMatches = line.match(/{/g) || [];
@@ -781,45 +807,12 @@ async function classifyCodeReferencePlan(input) {
     return { useCodeReference: false, searchTerms: [], reason: "empty_input" };
   }
 
-  const normalized = text.toLowerCase();
-  const codeTriggers = [
-    "코드",
-    "소스",
-    "함수",
-    "메서드",
-    "메소드",
-    "구현",
-    "내부",
-    "동작",
-    "작동",
-    "로직",
-    "버그",
-    "오류",
-    "에러",
-    "디버그",
-    "정의",
-    "설계",
-    "함수명",
-    "메서드명",
-    "미들웨어",
-    "라이브러리",
-    "모듈",
-    "구조",
-    "작업",
-  ];
-
-  const useCodeReference = codeTriggers.some((keyword) => normalized.includes(keyword));
+  const useCodeReference = await detectCodeTrigger(text);
   if (!useCodeReference) {
     return { useCodeReference: false, searchTerms: [], reason: "no_code_keywords" };
   }
 
-  const rawTerms = Array.from(
-    new Set(
-      (text.match(/[가-힣a-zA-Z0-9_]+/g) || [])
-        .map((token) => String(token || "").trim().toLowerCase())
-        .filter((token) => token.length >= 2 && !/^\d+$/.test(token)),
-    ),
-  );
+  const rawTerms = await extractTokens(text);
 
   const stopwords = new Set([
     "이",
@@ -999,6 +992,7 @@ function isTransientBotStatusMessage(msg) {
 async function getRecentChannelContextForPrompt(message, options = {}) {
   const fetchLimit = Number(options.fetchLimit || CHANNEL_CONTEXT_FETCH_LIMIT);
   const useLimit = Number(options.useLimit || CHANNEL_CONTEXT_USE_LIMIT);
+  const beforeTimestamp = Number(options.beforeTimestamp || 0);
   const excludeMessageIds = new Set(
     Array.isArray(options.excludeMessageIds)
       ? options.excludeMessageIds.map((id) => String(id))
@@ -1017,6 +1011,7 @@ async function getRecentChannelContextForPrompt(message, options = {}) {
       .filter((msg) => msg && !excludeMessageIds.has(String(msg.id)))
       .filter((msg) => !msg.system)
       .filter((msg) => !isTransientBotStatusMessage(msg))
+      .filter((msg) => beforeTimestamp === 0 || Number(msg.createdTimestamp || 0) < beforeTimestamp)
       .sort((a, b) => Number(a.createdTimestamp || 0) - Number(b.createdTimestamp || 0));
 
     const lines = items
@@ -1051,13 +1046,13 @@ client.on("messageCreate", async (message) => {
   let adminModelRequest = null;
   let adminCodeRequest = null;
   if (isAbsolutePowerUser && rawText && !isCommandMessage) {
-    const modelTrigger = /\b모델\b|모델\s*호출|호출\s*모델|model/i;
-    const codeTrigger = /\b코드\b|내부 코드|소스 코드|코드 보여줘/i;
-    if (modelTrigger.test(rawText)) {
-      adminModelRequest = parseAdminModelRequest(rawText);
+    const isModelRequest = await detectModelTrigger(rawText);
+    const isCodeRequest = await detectCodeTrigger(rawText);
+    if (isModelRequest) {
+      adminModelRequest = await parseAdminModelRequest(rawText);
     }
-    if (codeTrigger.test(rawText)) {
-      adminCodeRequest = parseAdminCodeRequest(rawText);
+    if (isCodeRequest) {
+      adminCodeRequest = await parseAdminCodeRequest(rawText);
     }
   }
 
@@ -1096,13 +1091,14 @@ client.on("messageCreate", async (message) => {
 
   const nowMs = Date.now();
   const pendingKey = buildPendingKey(message);
-  const hasPendingPowerAction = pendingRestartConfirm.has(pendingKey) || pendingShutdownConfirm.has(pendingKey);
   let powerControlIntent = { intent: "none", reason: "" };
-  // Prefix-less power-control detection disabled to avoid reacting to general chat.
-  const AUTHORIZED_ADMIN_ID = "1269575955626725390";
+
+  if (isAbsolutePowerUser && !isCommandMessage && rawText) {
+    powerControlIntent = await classifyPowerControlIntent(rawText);
+  }
 
   // !reload-assets: 자산 데이터 새로고침 (특정 관리자 전용)
-  if ((rawText === "!reload-assets" || rawText === "!업데이트") && message.author.id === AUTHORIZED_ADMIN_ID) {
+  if ((rawText === "!reload-assets" || rawText === "!업데이트") && message.author.id === ABSOLUTE_POWER_USER_ID) {
     try {
       reloadAssets();
       return message.reply("✅ `user_assets.json` 데이터를 성공적으로 다시 불러왔습니다.");
@@ -1112,7 +1108,7 @@ client.on("messageCreate", async (message) => {
   }
 
   // !reload-bot: 봇 리로드 (특정 관리자 전용)
-  if (rawText === "!reload-bot" && message.author.id === AUTHORIZED_ADMIN_ID) {
+  if (rawText === "!reload-bot" && message.author.id === ABSOLUTE_POWER_USER_ID) {
     logActionAudit({
       phase: "requested",
       action: "reload-bot",
@@ -1934,6 +1930,44 @@ client.on("messageCreate", async (message) => {
     return;
   }
 
+  // 날씨 조회 — AI가 의도·지역·목록 요청 판별
+  const weatherPlan = await parseWeatherRequest(fullInput);
+  if (weatherPlan.isWeatherRequest) {
+    try {
+      if (weatherPlan.listRegions) {
+        const regionList = getAvailableRegionsText();
+        await updateStatusWithOptionalPermission(message, statusMessage, regionList, {
+          permissionLines: ["기상청 날씨정보 API"],
+        });
+        saveConversation(message, "assistant", regionList);
+        return;
+      }
+
+      const regionName = weatherPlan.regionName || "서울";
+
+      await getWeatherForecast(regionName);
+      const weatherMessage = await formatWeatherMessage(regionName);
+      
+      await updateStatusWithOptionalPermission(message, statusMessage, weatherMessage, {
+        permissionLines: ["기상청 날씨정보 API"],
+      });
+      saveConversation(message, "assistant", weatherMessage);
+      return;
+    } catch (err) {
+      logError("messageCreate.weather", err, {
+        guildId: message.guild?.id || null,
+        userId: message.author?.id || null,
+        input: fullInput,
+      });
+      try {
+        await statusMessage.edit("날씨 정보를 조회하는 중 오류가 발생했습니다.");
+      } catch {
+        await message.reply("날씨 정보를 조회하는 중 오류가 발생했습니다.");
+      }
+      return;
+    }
+  }
+
   const commandPlan = await classifyCommandPlan(fullInput);
   const shouldUseWebSearch = commandPlan.useWebSearch;
   if (shouldUseWebSearch) {
@@ -1943,6 +1977,9 @@ client.on("messageCreate", async (message) => {
       // ignore edit errors
     }
   }
+
+  // 프롬프트 생성 전 현재 시각을 기록하여, 이 이후로 도착한 메시지는 컨텍스트에서 제외
+  const contextCutoffTimestamp = Date.now();
 
   const serverInfoIntent = commandPlan.serverInfoIntent;
   if (serverInfoIntent === "server_member_count" || serverInfoIntent === "server_role_list") {
@@ -1990,6 +2027,7 @@ client.on("messageCreate", async (message) => {
   const historyText = formatHistoryForPrompt(history);
   const recentChannelContext = await getRecentChannelContextForPrompt(message, {
     excludeMessageIds: [statusMessage.id],
+    beforeTimestamp: contextCutoffTimestamp,
   });
   const codeReferencePlan = await classifyCodeReferencePlan(fullInput);
   const recentCodeContext = getRecentCodeContextForPrompt(codeReferencePlan);
@@ -2607,6 +2645,12 @@ client.once(Events.ClientReady, async () => {
   await registerSlashCommands(client, { profile: "primary" });
 
   const shardId = client.shard?.ids?.[0] ?? 0;
+
+  try {
+    await client.user.setActivity("봇 개발중");
+  } catch {
+    // ignore activity errors
+  }
 
   console.log(
     `${client.user.tag} 봇이 온라인 상태입니다. 샤드: ${shardId}, 접두사: ${PREFIX}, 현재 모델: ${getCurrentModelName()}`,

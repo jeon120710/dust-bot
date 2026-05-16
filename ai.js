@@ -432,28 +432,17 @@ async function generateWithHuggingFace(modelName, prompt, options = {}) {
     promptMessages = [{ role: "user", text: String(prompt || "") }];
   }
 
-  const textPrompt = promptMessages
-    .map((p) => `${p.role}: ${p.parts ? p.parts.map((part) => part.text).join("") : p.text}`)
-    .join("\n\n");
+  const formattedMessages = promptMessages.map(p => ({
+    role: p.role === "model" ? "assistant" : p.role,
+    content: p.parts ? p.parts.map(part => part.text).join("") : (p.text || p.content || "")
+  }));
 
-  const response = await hfClient.responses.create({
+  const response = await hfClient.chat.completions.create({
     model: modelName,
-    input: textPrompt,
+    messages: formattedMessages,
   });
 
-  const textOutput =
-    String(response.output_text || "") ||
-    (Array.isArray(response.output)
-      ? response.output
-          .map((outputItem) => {
-            if (typeof outputItem === "string") return outputItem;
-            if (Array.isArray(outputItem?.content)) {
-              return outputItem.content.map((c) => String(c?.text || "")).join("");
-            }
-            return "";
-          })
-          .join(" ")
-      : "");
+  const textOutput = response.choices?.[0]?.message?.content || "";
 
   return {
     text: textOutput,

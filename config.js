@@ -22,6 +22,7 @@ export const DISCORD_TOKEN2 = process.env.DISCORD_TOKEN2;
 export const ABSOLUTE_POWER_USER_ID = process.env.ABSOLUTE_POWER_USER_ID || "1269575955626725390";
 export const LOG_FILE_PATH = process.env.LOG_FILE_PATH || "logs/bot-events.jsonl";
 export const SHARD_COUNT = process.env.SHARD_COUNT || "auto";
+export const KMA_API_KEY = process.env.KMA_API_KEY || "";
 
 if (!DISCORD_TOKEN) {
   console.error("DISCORD_TOKEN이 설정되어 있지 않습니다. .env를 확인하세요.");
