@@ -286,12 +286,41 @@ ${String(stackTrace || "").slice(0, 1000)}
   return refs;
 }
 
-// 8. 텍스트 정규화 (공백 제거)
+// 8. 예/아니오 확인 (동기)
+export function detectBinaryConfirmation(text) {
+  const normalized = String(text || "").trim();
+  if (!normalized) return null;
+
+  const compact = normalized.replace(/\s+/g, "").toLowerCase();
+
+  const confirmPatterns = [
+    /^(?:응|예|네|넵|맞아|확인|진행|좋아|ㅇㅇ|ㅇㅋ|ok|okay|yes|yep|sure)$/i,
+    /^(?:해줘|해주세요|부탁해)$/i,
+  ];
+  const cancelPatterns = [
+    /^(?:아니|아니오|아뇨|노|no|nope|cancel|취소|안해|안할래|그만|싫어|됐어|하지마)$/i,
+  ];
+
+  if (confirmPatterns.some((p) => p.test(compact) || p.test(normalized))) return "confirm";
+  if (cancelPatterns.some((p) => p.test(compact) || p.test(normalized))) return "cancel";
+  return null;
+}
+
+// 9. 재시작/종료 의도 (동기)
+export function detectPowerIntent(text) {
+  const normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return "none";
+  if (/(?:봇\s*)?재시작|리로드|reload|restart/i.test(normalized)) return "restart";
+  if (/(?:봇\s*)?종료|shutdown|셧다운|power\s*off/i.test(normalized)) return "shutdown";
+  return "none";
+}
+
+// 10. 텍스트 정규화 (공백 제거)
 export function normalizeWhitespace(text) {
   return String(text || "").replace(/\s+/g, " ").trim();
 }
 
-// 9. 문자열 정규화 (인용부호/기호 제거)
+// 11. 문자열 정규화 (인용부호/기호 제거)
 export function normalizeQuotes(text) {
   return String(text || "")
     .replace(/^["'`]+|["'`]+$/g, "")
@@ -299,7 +328,7 @@ export function normalizeQuotes(text) {
     .trim();
 }
 
-// 10. 중괄호 매칭
+// 12. 중괄호 매칭
 export function findMatchingBrace(lines, startLine) {
   let braceCount = 0;
   let foundBlock = false;
