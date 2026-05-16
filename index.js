@@ -53,6 +53,8 @@ import {
   detectCodeTrigger,
   extractTokens,
   parseWeatherRequest,
+  detectPowerIntent,
+  detectBinaryConfirmation,
 } from "./regex_classifier.js";
 
 
@@ -149,6 +151,13 @@ async function classifyBinaryConfirmation(text, options = {}) {
     cancelRule = "cancel: 실행을 하지 말라고 명확히 거부/취소",
   } = options;
 
+  // 1. 정규식으로 먼저 시도 (매우 빠름)
+  const fastDecision = detectBinaryConfirmation(text);
+  if (fastDecision) {
+    return { decision: fastDecision, reason: "regex_match" };
+  }
+
+  // 2. 모호한 경우에만 AI 호출
   const prompt = `
 당신은 디스코드 봇 운영 보조 분류기입니다.
 아래 사용자 메시지가 "${targetLabel}"에 대한 명확한 확인인지 판단하세요.
@@ -218,6 +227,13 @@ async function classifyTargetConfirmation(text) {
 }
 
 async function classifyPowerControlIntent(text) {
+  // 1. 정규식 우선 판단
+  const fastIntent = detectPowerIntent(text);
+  if (fastIntent !== "none") {
+    return { intent: fastIntent, reason: "regex_match" };
+  }
+
+  // 2. AI 보조 판단
   const prompt = `
 당신은 디스코드 봇 운영 보조 분류기입니다.
 아래 메시지가 봇 재시작/종료 요청인지 분류하세요.
@@ -1034,49 +1050,93 @@ client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
   const rawText = String(message.content || "").trim();
-  const isAbsolutePowerUser = message.author?.id === ABSOLUTE_POWER_USER_ID;
-  const isPrefixedCommand = rawText.startsWith(PREFIX);
-  let directCommandIntent = { intent: "none", argsText: "", reason: "" };
-  let isDirectResetCommand = false;
-  if (!isPrefixedCommand) {
-    const resetMatch = rawText.match(/^!reset[_-]memory\b\s*(.*)$/i);
-    if (resetMatch) {
-      isDirectResetCommand = true;
-      directCommandIntent = {
-        intent: "reset_memory",
-        argsText: String(resetMatch[1] || "").trim(),
-        reason: "direct_parse",
-      };
-    }
-  }
-  const isCommandMessage = isPrefixedCommand || isDirectResetCommand;
+  if (!rawText) return;
 
-  const nowMs = Date.now();
-  const pendingKey = buildPendingKey(message);
-
-  // !reload-assets: 자산 데이터 새로고침 (특정 관리자 전용)
-  if ((rawText === "!reload-assets" || rawText === "!업데이트") && message.author.id === ABSOLUTE_POWER_USER_ID) {
-    try {
-      reloadAssets();
-      return message.reply("✅ `user_assets.json` 데이터를 성공적으로 다시 불러왔습니다.");
-    } catch (err) {
-      return message.reply("❌ 데이터 로드 중 오류가 발생했습니다. 로그를 확인하세요.");
-    }
-  }
-
-  // !reload-bot: 봇 리로드 (특정 관리자 전용)
-  if (rawText === "!reload-bot" && message.author.id === ABSOLUTE_POWER_USER_ID) {
-    logActionAudit({
-      phase: "requested",
-      action: "reload-bot",
-      guildId: message.guild?.id || null,
-      userId: message.author?.id || null,
-    });
-    await performRestart(client, message);
+  // 1. 타자 게임 제출 여부 먼저 확인 (가장 빠름)
+  if (await tryHandleTypingGameSubmission(message)) {
     return;
   }
 
-  if (isAbsolutePowerUser && rawText) {
+  const isAbsolutePowerUser = message.author?.id === ABSOLUTE_POWER_USER_ID;
+  const isPrefixedCommand = rawText.startsWith(PREFIX);
+  
+  const isDirectResetCandidate = !isPrefixedCommand && rawText.startsWith("!");
+  const isDirectResetCommand = isDirectResetCandidate && /^!reset[_-]memory\b/i.test(rawText);
+
+  const isCommandMessage = isPrefixedCommand || isDirectResetCommand;
+  const pendingKey = buildPendingKey(message);
+
+  // 2. 대기 중인 확인 작업이 있는지 확인 (Map 조회는 비용이 매우 저렴함)
+  const hasPending = pendingRestartConfirm.has(pendingKey) || 
+                     pendingShutdownConfirm.has(pendingKey) || 
+                     pendingPrivilegedAction.has(pendingKey) || 
+                     pendingTargetConfirm.has(pendingKey) ||
+                     pendingErrorRepairConfirm.has(pendingKey);
+
+  // 명령어도 아니고, 대기 중인 답변도 아니면 즉시 종료하여 AI 호출 방지
+  if (!isCommandMessage && !hasPending) {
+    return;
+  }
+
+  let directCommandIntent = { intent: "none", argsText: "", reason: "" };
+  if (isDirectResetCommand) {
+    directCommandIntent = parseDirectResetCommand(rawText);
+  }
+  let adminModelRequest = null;
+  let adminCodeRequest = null;
+  if (isAbsolutePowerUser && isPrefixedCommand) {
+    // 관리자 요청 분석 병렬 처리
+    const [isModelTriggered, isCodeTriggered] = [detectModelTrigger(rawText), detectCodeTrigger(rawText)];
+    const requests = await Promise.all([
+      isModelTriggered ? parseAdminModelRequest(rawText) : Promise.resolve(null),
+      isCodeTriggered ? parseAdminCodeRequest(rawText) : Promise.resolve(null),
+    ]);
+    adminModelRequest = requests[0];
+    adminCodeRequest = requests[1];
+  }
+
+  if (adminCodeRequest) {
+    await statusMessage.delete().catch(() => {});
+    const snippet = getAdminCodeSnippet(adminCodeRequest);
+    if (snippet.error && snippet.text) {
+      await message.reply(`${snippet.error}\n${snippet.text}`);
+    } else if (snippet.error) {
+      await message.reply(snippet.error);
+    } else {
+      await message.reply(snippet.text);
+    }
+    return;
+  }
+
+  if (adminModelRequest) {
+    const statusMessage = await message.reply("-# <a:load:1495336917326368829> 관리자 모델 호출 중...");
+    if (message.channel?.isTextBased?.()) {
+      try {
+        await message.channel.sendTyping();
+      } catch {
+        // ignore typing errors
+      }
+    }
+
+    const prompt = adminModelRequest.prompt || "이 모델을 테스트하기 위한 간단한 한국어 응답을 생성해 주세요.";
+    try {
+      const result = await callSpecificModel(adminModelRequest.modelName, prompt, { channel: message.channel });
+      const responseText = typeof result === "string" ? result : result.text || JSON.stringify(result);
+      await statusMessage.edit(`모델 ${adminModelRequest.modelName} 호출 결과:\n${responseText}`);
+    } catch (err) {
+      await statusMessage.edit(`모델 호출에 실패했습니다: ${String(err?.message || err)}`);
+    }
+    return;
+  }
+
+  const nowMs = Date.now();
+  let powerControlIntent = { intent: "none", reason: "" };
+
+  if (isAbsolutePowerUser && isPrefixedCommand) {
+    powerControlIntent = await classifyPowerControlIntent(rawText);
+  }
+
+  if (isAbsolutePowerUser) {
     const pending = pendingRestartConfirm.get(pendingKey);
     if (pending) {
       const ageMs = nowMs - pending.requestedAt;
@@ -1136,9 +1196,8 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (!pendingRestartConfirm.has(pendingKey) && isPrefixedCommand) {
-      const restartIntent = await classifyPowerControlIntent(rawText.slice(PREFIX.length).trim());
-      if (restartIntent.intent === "restart") {
+    if (!pendingRestartConfirm.has(pendingKey)) {
+      if (powerControlIntent.intent === "restart") {
         pendingRestartConfirm.set(pendingKey, {
           requestedAt: nowMs,
           channelId: message.channel?.id || null,
@@ -1152,7 +1211,7 @@ client.on("messageCreate", async (message) => {
           commandText: rawText,
         });
         try {
-          await message.reply("재시작을 진행할까요? \"응\" 또는 \"아니\"로 답해 주세요.");
+          await statusMessage.edit("재시작을 진행할까요? \"응\" 또는 \"아니\"로 답해 주세요.");
         } catch {
           // ignore reply errors
         }
@@ -1161,7 +1220,7 @@ client.on("messageCreate", async (message) => {
     }
   }
 
-  if (isAbsolutePowerUser && rawText) {
+  if (isAbsolutePowerUser) {
     const pending = pendingShutdownConfirm.get(pendingKey);
     if (pending) {
       const ageMs = nowMs - pending.requestedAt;
@@ -1221,9 +1280,8 @@ client.on("messageCreate", async (message) => {
       }
     }
 
-    if (!pendingShutdownConfirm.has(pendingKey) && isPrefixedCommand) {
-      const shutdownIntent = await classifyPowerControlIntent(rawText.slice(PREFIX.length).trim());
-      if (shutdownIntent.intent === "shutdown") {
+    if (!pendingShutdownConfirm.has(pendingKey)) {
+      if (powerControlIntent.intent === "shutdown") {
         pendingShutdownConfirm.set(pendingKey, {
           requestedAt: nowMs,
           channelId: message.channel?.id || null,
@@ -1237,7 +1295,7 @@ client.on("messageCreate", async (message) => {
           commandText: rawText,
         });
         try {
-          await message.reply("종료를 진행할까요? \"응\" 또는 \"아니\"로 답해 주세요.");
+          await statusMessage.edit("종료를 진행할까요? \"응\" 또는 \"아니\"로 답해 주세요.");
         } catch {
           // ignore reply errors
         }
@@ -1247,7 +1305,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const pendingPrivileged = pendingPrivilegedAction.get(pendingKey);
-  if (pendingPrivileged && pendingPrivileged.message?.author?.id === message.author?.id) {
+  if (pendingPrivileged) {
     const ageMs = nowMs - pendingPrivileged.requestedAt;
     if (ageMs > PRIVILEGED_ACTION_TTL_MS) {
       pendingPrivilegedAction.delete(pendingKey);
@@ -1288,7 +1346,7 @@ client.on("messageCreate", async (message) => {
   }
 
   const pendingTarget = pendingTargetConfirm.get(pendingKey);
-  if (pendingTarget && pendingTarget.message?.author?.id === message.author?.id) {
+  if (pendingTarget) {
     const ageMs = nowMs - pendingTarget.requestedAt;
     if (ageMs > TARGET_CONFIRM_TTL_MS) {
       pendingTargetConfirm.delete(pendingKey);
@@ -1382,69 +1440,6 @@ client.on("messageCreate", async (message) => {
   }
 
 
-
-  if (await tryHandleTypingGameSubmission(message)) {
-    return;
-  }
-  if (!isPrefixedCommand && !isDirectResetCommand) return;
-
-  let adminModelRequest = null;
-  let adminCodeRequest = null;
-  if (isAbsolutePowerUser && isPrefixedCommand) {
-    const adminInput = rawText.slice(PREFIX.length).trim();
-    if (adminInput) {
-      const isModelRequest = await detectModelTrigger(adminInput);
-      const isCodeRequest = await detectCodeTrigger(adminInput);
-      if (isModelRequest) {
-        adminModelRequest = await parseAdminModelRequest(adminInput);
-      }
-      if (isCodeRequest) {
-        adminCodeRequest = await parseAdminCodeRequest(adminInput);
-      }
-    }
-  }
-
-  if (adminCodeRequest) {
-    const snippet = getAdminCodeSnippet(adminCodeRequest);
-    if (snippet.error && snippet.text) {
-      await message.reply(`${snippet.error}\n${snippet.text}`);
-    } else if (snippet.error) {
-      await message.reply(snippet.error);
-    } else {
-      await message.reply(snippet.text);
-    }
-    return;
-  }
-
-  if (adminModelRequest) {
-    const statusMessage = await message.reply("-# <a:load:1495336917326368829> 관리자 모델 호출 중...");
-    if (message.channel?.isTextBased?.()) {
-      try {
-        await message.channel.sendTyping();
-      } catch {
-        // ignore typing errors
-      }
-    }
-
-    const prompt = adminModelRequest.prompt || "이 모델을 테스트하기 위한 간단한 한국어 응답을 생성해 주세요.";
-    try {
-      const result = await callSpecificModel(adminModelRequest.modelName, prompt, { channel: message.channel });
-      const responseText = typeof result === "string" ? result : result.text || JSON.stringify(result);
-      await statusMessage.edit(`모델 ${adminModelRequest.modelName} 호출 결과:\n${responseText}`);
-    } catch (err) {
-      await statusMessage.edit(`모델 호출에 실패했습니다: ${String(err?.message || err)}`);
-    }
-    return;
-  }
-
-  const statusMessage = await message.reply("-# <a:load:1495336917326368829> 생각중...");
-  if (message.channel?.isTextBased?.()) {
-    try {
-      await message.channel.sendTyping();
-    } catch {
-      // ignore typing errors
-    }
-  }
   const input = isDirectResetCommand
     ? String(directCommandIntent.argsText || "").trim()
     : rawText.slice(PREFIX.length).trim();
